@@ -28,6 +28,6 @@ and a parallel version that uses Nvidia's CUDA platform (master branch).
 * Command line arguments: 
 ```
 #!bash
-    > nvcc main.cu -std=c++11 -lm -lGL -lGLU -lglut
+    > make
     > ./a.out file
 ```
