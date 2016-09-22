@@ -1169,7 +1169,7 @@ void n_body()
 				add_to_slices();
 				fprintf(slice_file, "%d ", time);
 				for(i = 0; i < n_slices; i++){ fprintf(slice_file, "%d ", n_in_slice[i]);}
-				for(i = 0; i < n_slices; i++){ fprintf(slice_file, "%d ", t_in_slice[i]);}
+				for(i = 0; i < n_slices; i++){ fprintf(slice_file, "%lf ", t_in_slice[i]);}
 				fprintf(slice_file, "\n");
 
 				for(i = 0; i < N; i++)
