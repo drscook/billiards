@@ -1231,7 +1231,7 @@ void n_body()
 		}
 		//end of this time step
 	}
-	printf("%i gas particles, %.1f timesteps, %.4f seconds in time\n", N, 1.0 * time, tt);
+	printf("%i gas particles, %.1f timesteps, %.4f seconds in time\n  HELLO WORLD", N, 1.0 * time, tt);
 
 	for(i = 0; i < N; i++)
 	{
