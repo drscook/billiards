@@ -3,7 +3,7 @@
 # switch (0 or 1) whether to visualize
 1
 # number of gas particles
-17
+12
 # size of gas particles
 0.1
 # type of particle-initialization scheke (0-cube, 1-pyramid)
