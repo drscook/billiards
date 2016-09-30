@@ -338,7 +338,7 @@ void pack_particles()
 	}
 }
 
-void set_initail_conditions()
+void set_initial_conditions()
 {
 	int i;
 	set_macros();
@@ -1054,7 +1054,7 @@ void n_body()
 
 	time = 0;
 	n = N;
-	while(time < STOP_TIME || burn_in_period > 0)
+	while(time++ < STOP_TIME || burn_in_period > 0)
 	{
 	  	// on GPU - find smallest time step s.t. any particle(s) collide either 
 	  	// with each other or a wall and update all particles to that time step
@@ -1065,11 +1065,11 @@ void n_body()
 		errorCheck(time, "find");
 
 		//copy minimum time step and index of corresponding colliding element onto CPU 
-		cudaMemcpy( how_many_p_CPU,   how_many_p_GPU,             N * sizeof(int  ), cudaMemcpyDeviceToHost);
-		cudaMemcpy( how_many_w_CPU,   how_many_w_GPU,             N * sizeof(int  ), cudaMemcpyDeviceToHost);
-		cudaMemcpy(     what_p_CPU,       what_p_GPU,             N * sizeof(int  ), cudaMemcpyDeviceToHost);
-		cudaMemcpy(     what_w_CPU,       what_w_GPU, max_walls * N * sizeof(int  ), cudaMemcpyDeviceToHost);
-		cudaMemcpy(          t_CPU,            t_GPU,             N * sizeof(float), cudaMemcpyDeviceToHost);
+		cudaMemcpy( how_many_p_CPU, how_many_p_GPU,             N * sizeof(int  ), cudaMemcpyDeviceToHost);
+		cudaMemcpy( how_many_w_CPU, how_many_w_GPU,             N * sizeof(int  ), cudaMemcpyDeviceToHost);
+		cudaMemcpy(     what_p_CPU,     what_p_GPU,             N * sizeof(int  ), cudaMemcpyDeviceToHost);
+		cudaMemcpy(     what_w_CPU,     what_w_GPU, max_walls * N * sizeof(int  ), cudaMemcpyDeviceToHost);
+		cudaMemcpy(          t_CPU,          t_GPU,             N * sizeof(float), cudaMemcpyDeviceToHost);
 
 		find_min_dt(t_CPU, &t);
 
@@ -1124,12 +1124,11 @@ void n_body()
 		// update position on GPU to new time step
 		// update velocity on GPU to match CPU 
 		// (and also tag which keeps track of most recent collision for each particle)
-		cudaMemcpy(          p_GPU,            p_CPU,             N * sizeof(float3), cudaMemcpyHostToDevice );
-		cudaMemcpy(          v_GPU,            v_CPU,             N * sizeof(float3), cudaMemcpyHostToDevice );
-		cudaMemcpy(        tag_GPU,          tag_CPU, max_walls * N * sizeof(int   ), cudaMemcpyHostToDevice );
+		cudaMemcpy(   p_GPU,   p_CPU,             N * sizeof(float3), cudaMemcpyHostToDevice );
+		cudaMemcpy(   v_GPU,   v_CPU,             N * sizeof(float3), cudaMemcpyHostToDevice );
+		cudaMemcpy( tag_GPU, tag_CPU, max_walls * N * sizeof(int   ), cudaMemcpyHostToDevice );
 
 		tt += t;
-		time++;
 
 		//fireproofing: check at each time step that no particles escaped.
 		for (i = 0; i < N; i++)
@@ -1211,7 +1210,7 @@ int main(int argc, char** argv)
 	{
 		in_fname = argv[1];
 	}
-	set_initail_conditions();
+	set_initial_conditions();
 
 	if (visualize)
 	{
