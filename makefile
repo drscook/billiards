@@ -5,7 +5,7 @@ GPP = nvcc
 COMPFLAGS = -std=c++11
 LINKFLAGS = 
 
-3DOBJ = master.exe
+3DOBJ = output_files.exe
 LDFLAGS = -lGL -lGLU -lglut
 
 $(3DOBJ) : main.cu
