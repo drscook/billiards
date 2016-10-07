@@ -826,7 +826,7 @@ void resolve_particle_collision(int i0, float time)
 				}
 				else
 				{
-//					point = get_intersection_point(time, i0);
+					point = get_intersection_point(time, i0);
 //					temp_at_point = wall_temperature(point, wall);
 					temp_at_point = WALL_TEMP[wall][0];
 
