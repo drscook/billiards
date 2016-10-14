@@ -1179,35 +1179,6 @@ void control()
 }
 
 
-/*
-
-void Display(void)
-{
-  	if(DIMENSION == 3){
-		gluLookAt(0.0, 0.0, 1.5 * EYE, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
-	}
-	else
-	{
-		gluLookAt(0.0, 0.0, EYE, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
-	}
-	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	control();
-}
-
-void reshape(int w, int h)
-{
-	glViewport(0, 0, (GLsizei) w, (GLsizei) h);
-
-	glMatrixMode(GL_PROJECTION);
-
-	glLoadIdentity();
-
-	glFrustum(-0.2, 0.2, -0.2, 0.2, 0.2, FAR);
-
-	glMatrixMode(GL_MODELVIEW);
-}
-
-*/
 
 int main(int argc, char** argv)
 {
@@ -1225,6 +1196,20 @@ int main(int argc, char** argv)
 	set_initial_conditions();
 
   visualize = false;
+
+	control();
+	return 0;
+}
+
+
+
+
+
+
+//old openGL visualization code
+
+
+
   
   /*
 	if (visualize)
@@ -1264,6 +1249,33 @@ int main(int argc, char** argv)
 	}
 	*/
 	
+
+/*
+
+void Display(void)
+{
+  	if(DIMENSION == 3){
+		gluLookAt(0.0, 0.0, 1.5 * EYE, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
+	}
+	else
+	{
+		gluLookAt(0.0, 0.0, EYE, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
+	}
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	control();
-	return 0;
 }
+
+void reshape(int w, int h)
+{
+	glViewport(0, 0, (GLsizei) w, (GLsizei) h);
+
+	glMatrixMode(GL_PROJECTION);
+
+	glLoadIdentity();
+
+	glFrustum(-0.2, 0.2, -0.2, 0.2, 0.2, FAR);
+
+	glMatrixMode(GL_MODELVIEW);
+}
+
+*/
