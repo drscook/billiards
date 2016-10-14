@@ -1164,6 +1164,7 @@ void n_body()
 }
 
 
+/*
 
 void control()
 {	
@@ -1205,6 +1206,8 @@ void reshape(int w, int h)
 	glMatrixMode(GL_MODELVIEW);
 }
 
+*/
+
 int main(int argc, char** argv)
 {
 	//glutInit(&argc,argv);
@@ -1221,6 +1224,8 @@ int main(int argc, char** argv)
 	set_initial_conditions();
 
   visualize = false;
+  
+  /*
 	if (visualize)
 	{
 		glutInitDisplayMode(GLUT_DOUBLE | GLUT_DEPTH | GLUT_RGB);
@@ -1256,5 +1261,6 @@ int main(int argc, char** argv)
 	{
 		control();
 	}
+	*/
 	return 0;
 }
