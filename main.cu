@@ -1046,16 +1046,16 @@ void n_body()
 	int burn_in_period = 0, i, j, time, n;
 
 	/*/		OUTPUT FILE STUFF		 /*/
-	vis_file = fopen(strcat(strcpy(dir, dir_name), "visualization.csv"), "w");
-	fprintf(vis_file, "#box dimension\n box, %lf\n", MAX_CUBE_DIM);
-	fprintf(vis_file, "#particle radii\n");
+	data_file = fopen(strcat(strcpy(dir, dir_name), "data.csv"), "w");
+	fprintf(data_file, "#box dimension\n box, %lf\n", MAX_CUBE_DIM);
+	fprintf(data_file, "#particle radii\n");
 	for(i = 0; i < N; i++)
 	{
-		fprintf(vis_file, "r, %d, %lf, %lf\n", i, radius_CPU[i], mass_CPU[i]);
+		fprintf(data_file, "r, %d, %lf, %lf\n", i, radius_CPU[i], mass_CPU[i]);
 	}
 	for(i = 0; i < N; i++)
 	{
-		fprintf(vis_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+		fprintf(data_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
 					i, 0, tt, 
 					p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
 					0.0, 0.0, 0.0,
@@ -1094,6 +1094,7 @@ void n_body()
 
 		check_complex_collisions(&t, t_CPU);
 
+    /*
 		if(visualize) smooth_vis(t);
 		for (i = 0; i < N; i++)
 		{
@@ -1101,6 +1102,7 @@ void n_body()
 			p_CPU[i].y += t_CPU[i] * v_CPU[i].y;
 			p_CPU[i].z += t_CPU[i] * v_CPU[i].z;
 		}
+		*/
 
 		for(i = 0; i < N; i++)
 		{
@@ -1112,7 +1114,7 @@ void n_body()
 
 				for(j = 0; j < n_events; j++)
 				{
-					fprintf(vis_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+					fprintf(data_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
 						collides[j], collider[j], tt, 
 						p_CPU[collides[j]].x, p_CPU[collides[j]].y, p_CPU[collides[j]].z, 
 						0.0, 0.0, 0.0,
@@ -1152,7 +1154,7 @@ void n_body()
 
 	for(i = 0; i < N; i++)
 	{
-		fprintf(vis_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+		fprintf(data_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
 					i, 0, tt, 
 					p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
 					0.0, 0.0, 0.0,
@@ -1160,7 +1162,7 @@ void n_body()
 					collision_normal.x, collision_normal.y, collision_normal.z
 			);
 	}
-	fclose(vis_file);
+	fclose(data_file);
 }
 
 
