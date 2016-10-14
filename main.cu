@@ -1041,7 +1041,7 @@ void check_complex_collisions(float * t, float * particle_t)
 void n_body()
 {
 	float t, tt = 0.0;
-	FILE * vis_file;
+	FILE * data_file;
 	char dir[256];
 	int burn_in_period = 0, i, j, time, n;
 
