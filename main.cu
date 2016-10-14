@@ -93,7 +93,7 @@ float gas_temp;
 // reads input file of parameters (temperature of walls, particle size, &c)
 void set_macros()
 {
-  	FILE * fp = NULL;
+  FILE * fp = NULL;
 	const int bdim = 132;
 	char buff[bdim];
 	int i, d;
@@ -412,85 +412,7 @@ void set_initial_conditions()
 
 }
 
-void draw_picture()
-{
-	int i;
-	float red, green, blue, hi, mid;
-	
-	glClear(GL_COLOR_BUFFER_BIT);
-	glClear(GL_DEPTH_BUFFER_BIT);
-	
-	glColor3d(1.0,1.0,0.5);
-	for(i=0; i<N; i++)
-	{
-		hi = MIN(p_temp_CPU[i] / max_temp, 1.7);
-		mid = 0.75 - hi;
-		red = hi * hi;
-		green = 1.0 - mid * mid * mid * mid;
-		blue = 1.5 - red;
 
-		glColor3f(red, green, blue);
-		glPushMatrix();
-		glTranslatef(p_CPU[i].x, p_CPU[i].y, p_CPU[i].z);
-		glutSolidSphere(radius_CPU[i],20,20);
-		glPopMatrix();
-	}
-
-	if(DIMENSION > 2)//if we're in 3D
-	{
-		glBegin(GL_QUADS);
-		glColor3f(0.8, 0.8, 0.8);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
-
-		glColor3f(1.0, 1.0, 1.0);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM,  MAX_CUBE_DIM);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM,  MAX_CUBE_DIM);
-
-		glColor3f(1.0, 1.0, 1.0);
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM,  MAX_CUBE_DIM);
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM,  MAX_CUBE_DIM);
-
-		glColor3f(0.0, 1.0, 1.0);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM,  MAX_CUBE_DIM);
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM,  MAX_CUBE_DIM);
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
-
-		glColor3f(1.0, 0.15, 0.0);
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM,  MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM,  MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glEnd();
-	}
-	else // if we're in 2D
-	{
-		glBegin(GL_LINES);
-		glColor3f(0.0, 1.0, 1.0);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, 0.0);
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, 0.0);
-
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, 0.0);
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, 0.0);
-
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, 0.0);
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, 0.0);
-
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, 0.0);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, 0.0);
-
-		glEnd();
-	}
-
-	glutSwapBuffers();
-}
 
 __device__ int particle_wall_collision(float3 * p, float3 * v, float * radius, float max_cube_dim, int i0, int i1, float * t)
 {
@@ -745,6 +667,8 @@ float3 heated_wall(float3 v_in, float T, float m, float3 n)
 	}
 	return v_out;
 }
+
+
 void resolve_particle_collision(int i0, float time)
 {
 	float3 t, x_v1, y_v1, x_v2, y_v2, n;
@@ -898,46 +822,7 @@ void resolve_particle_collision(int i0, float time)
 	}
 }
 
-void smooth_vis(float time)
-{
-	//float3 new_pos[N];
-	float3 * new_pos = (float3*)malloc(N * sizeof(float3));
-	float dt;
-	int i, j, num;
 
-	dt = DT;
-	num = (int)((time / dt) + 0.5);
-
-	compute_t();
-
-	for(i = 0; i < N; i++)
-	{
-		new_pos[i].x = p_CPU[i].x;
-		new_pos[i].y = p_CPU[i].y;
-		new_pos[i].z = p_CPU[i].z;
-	}
-
-	dt = time / (1.0 * (num - 1.0));
-	if((num - 1) < 1){dt = time;}
-
-	for(i = 0; i < num; i++)
-	{
-		for(j = 0; j < N; j++)
-		{
-			p_CPU[j].x = new_pos[j].x + (v_CPU[j].x * dt * i);
-			p_CPU[j].y = new_pos[j].y + (v_CPU[j].y * dt * i);
-			p_CPU[j].z = new_pos[j].z + (v_CPU[j].z * dt * i);
-		}
-		draw_picture();
-	}
-
-	for(i = 0; i < N; i++)
-	{
-		p_CPU[i].x = new_pos[i].x;
-		p_CPU[i].y = new_pos[i].y;
-		p_CPU[i].z = new_pos[i].z;
-	}
-}
 
 //float find_min_dt_and_update(float * times, int * idx, int * i0, int * i1)
 void find_min_dt(float * times, float * min_dt)
@@ -1265,4 +1150,130 @@ void reshape(int w, int h)
 	glMatrixMode(GL_MODELVIEW);
 }
 
+
+
+void draw_picture()
+{
+	int i;
+	float red, green, blue, hi, mid;
+	
+	glClear(GL_COLOR_BUFFER_BIT);
+	glClear(GL_DEPTH_BUFFER_BIT);
+	
+	glColor3d(1.0,1.0,0.5);
+	for(i=0; i<N; i++)
+	{
+		hi = MIN(p_temp_CPU[i] / max_temp, 1.7);
+		mid = 0.75 - hi;
+		red = hi * hi;
+		green = 1.0 - mid * mid * mid * mid;
+		blue = 1.5 - red;
+
+		glColor3f(red, green, blue);
+		glPushMatrix();
+		glTranslatef(p_CPU[i].x, p_CPU[i].y, p_CPU[i].z);
+		glutSolidSphere(radius_CPU[i],20,20);
+		glPopMatrix();
+	}
+
+	if(DIMENSION > 2)//if we're in 3D
+	{
+		glBegin(GL_QUADS);
+		glColor3f(0.8, 0.8, 0.8);
+		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
+		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
+		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
+		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
+
+		glColor3f(1.0, 1.0, 1.0);
+		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
+		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
+		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM,  MAX_CUBE_DIM);
+		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM,  MAX_CUBE_DIM);
+
+		glColor3f(1.0, 1.0, 1.0);
+		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
+		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
+		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM,  MAX_CUBE_DIM);
+		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM,  MAX_CUBE_DIM);
+
+		glColor3f(0.0, 1.0, 1.0);
+		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
+		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM,  MAX_CUBE_DIM);
+		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM,  MAX_CUBE_DIM);
+		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
+
+		glColor3f(1.0, 0.15, 0.0);
+		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
+		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM,  MAX_CUBE_DIM);
+		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM,  MAX_CUBE_DIM);
+		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
+		glEnd();
+	}
+	else // if we're in 2D
+	{
+		glBegin(GL_LINES);
+		glColor3f(0.0, 1.0, 1.0);
+		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, 0.0);
+		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, 0.0);
+
+		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, 0.0);
+		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, 0.0);
+
+		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, 0.0);
+		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, 0.0);
+
+		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, 0.0);
+		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, 0.0);
+
+		glEnd();
+	}
+
+	glutSwapBuffers();
+}
+
+
+void smooth_vis(float time)
+{
+	//float3 new_pos[N];
+	float3 * new_pos = (float3*)malloc(N * sizeof(float3));
+	float dt;
+	int i, j, num;
+
+	dt = DT;
+	num = (int)((time / dt) + 0.5);
+
+	compute_t();
+
+	for(i = 0; i < N; i++)
+	{
+		new_pos[i].x = p_CPU[i].x;
+		new_pos[i].y = p_CPU[i].y;
+		new_pos[i].z = p_CPU[i].z;
+	}
+
+	dt = time / (1.0 * (num - 1.0));
+	if((num - 1) < 1){dt = time;}
+
+	for(i = 0; i < num; i++)
+	{
+		for(j = 0; j < N; j++)
+		{
+			p_CPU[j].x = new_pos[j].x + (v_CPU[j].x * dt * i);
+			p_CPU[j].y = new_pos[j].y + (v_CPU[j].y * dt * i);
+			p_CPU[j].z = new_pos[j].z + (v_CPU[j].z * dt * i);
+		}
+		draw_picture();
+	}
+
+	for(i = 0; i < N; i++)
+	{
+		p_CPU[i].x = new_pos[i].x;
+		p_CPU[i].y = new_pos[i].y;
+		p_CPU[i].z = new_pos[i].z;
+	}
+}
+
 */
+
+
