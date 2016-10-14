@@ -38,7 +38,7 @@ float default_mass = 2.0;
 //non-physical parameters
 int STOP_TIME = 1000;
 int steps_per_record = 50;
-int visualize = 1;
+//int visualize = 1;
 int track_large_particle = 0;
 int ignore_particle_interaction;
 int all_particles_diffused = 0;
@@ -112,7 +112,7 @@ void set_macros()
 	//non-physical parameters
 	STOP_TIME = 1000;
 	steps_per_record = 50;
-	visualize = false;
+	//visualize = false;
 	track_large_particle = false;
 	ignore_particle_interaction = false;
 
@@ -1170,7 +1170,7 @@ void control()
 {	
 	clock_t time_0, time_1;
 	
-	if(visualize) draw_picture();
+	//if(visualize) draw_picture();
 
 	time_0 = clock();
     	n_body();
@@ -1197,7 +1197,7 @@ int main(int argc, char** argv)
 	}
 	set_initial_conditions();
 
-  visualize = false;
+  //visualize = false;
 
 	control();
 	return 0;
