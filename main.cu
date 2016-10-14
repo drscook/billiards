@@ -1,4 +1,3 @@
-//Hello World
 #ifdef __APPLE__
 #include <GLUT/glut.h>
 #else
@@ -136,10 +135,10 @@ void set_macros()
 		sscanf(buff, "%d", &d);
 		DIMENSION = d;
 
-		fgets(buff,bdim,fp);
-		fgets(buff,bdim,fp);
-		sscanf(buff, "%d", &d);
-		visualize = d;
+		//fgets(buff,bdim,fp);
+		//fgets(buff,bdim,fp);
+		//sscanf(buff, "%d", &d);
+		//visualize = d;
 
 		fgets(buff, bdim, fp);
 		fgets(buff, bdim, fp);
@@ -1208,7 +1207,7 @@ void reshape(int w, int h)
 
 int main(int argc, char** argv)
 {
-	glutInit(&argc,argv);
+	//glutInit(&argc,argv);
 
 	//now that glut commands have been stripped from the 
 	if(--argc < 1)
@@ -1221,6 +1220,7 @@ int main(int argc, char** argv)
 	}
 	set_initial_conditions();
 
+  visualize = false
 	if (visualize)
 	{
 		glutInitDisplayMode(GLUT_DOUBLE | GLUT_DEPTH | GLUT_RGB);
