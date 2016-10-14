@@ -1220,7 +1220,7 @@ int main(int argc, char** argv)
 	}
 	set_initial_conditions();
 
-  visualize = false
+  visualize = false;
 	if (visualize)
 	{
 		glutInitDisplayMode(GLUT_DOUBLE | GLUT_DEPTH | GLUT_RGB);
