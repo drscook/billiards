@@ -1164,8 +1164,6 @@ void n_body()
 }
 
 
-/*
-
 void control()
 {	
 	clock_t time_0, time_1;
@@ -1179,6 +1177,9 @@ void control()
 	printf("\n Runtime %.5f seconds\n", (float)(time_1 - time_0) / CLOCKS_PER_SEC);
 	printf("\n DONE \n");
 }
+
+
+/*
 
 void Display(void)
 {
@@ -1262,5 +1263,7 @@ int main(int argc, char** argv)
 		control();
 	}
 	*/
+	
+	control();
 	return 0;
 }
