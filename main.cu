@@ -53,6 +53,7 @@ int max_walls = 3;  // number of walls that a particle can hit at a time
 char *in_fname = NULL;
 char dir_name[256] = "\0./";
 int n_events;
+int collides[2];
 int collider[2];
 
 //particle
@@ -67,6 +68,7 @@ float default_p_temp = 1.0; // default kinetic energy
 float *p_collisions = NULL;//mean free path
 float *w_collisions_heated = NULL;//mean free path
 float *w_collisions_passive= NULL;//mean free path
+float3 collision_normal;
 
 //walls
 float3 normal[6];
@@ -766,7 +768,8 @@ void resolve_particle_collision(int i0, float time)
 	{
 		t = v_CPU[i0];
 		n_events = 1;
-		collider[0] = i0;
+		collides[0] = i0;
+		collider[0] = what_w_CPU[i0];
 
 		if(how_many_w_CPU[i0] > 1) // if it hits mutliple walls
 		{
@@ -792,6 +795,7 @@ void resolve_particle_collision(int i0, float time)
 			n.x /= len; n.y /= len; n.z /= len;
 
 			v_CPU[i0] = specular_reflect(t, n);
+			collision_normal = n;
 		}
 		else // if hits single wall
 		{
@@ -824,6 +828,7 @@ void resolve_particle_collision(int i0, float time)
 
 				}
 			}
+		collision_normal = normal[wall];
 		}
 
 		for(i = how_many_w_CPU[i0]; i < max_walls; i++) tag_CPU[max_walls * i0 + i] = N;
@@ -834,8 +839,10 @@ void resolve_particle_collision(int i0, float time)
 		p_collisions[i0] += 1.0;
 		p_collisions[i1] += 1.0;
 		n_events = 2;
-		collider[0] = i0;
-		collider[1] = i1;
+		collides[0] = i0;
+		collides[1] = i1;
+		collider[0] = i1;
+		collider[1] = i0;
 
 		if(i1 < N)
 		{
@@ -1034,22 +1041,27 @@ void check_complex_collisions(float * t, float * particle_t)
 void n_body()
 {
 	float t, tt = 0.0;
-	FILE * vis_file, * data_file;
+	FILE * vis_file;
 	char dir[256];
-	int burn_in_period = 1, i, j, time, n;
+	int burn_in_period = 0, i, j, time, n;
 
 	/*/		OUTPUT FILE STUFF		 /*/
-	data_file = fopen(strcat(strcpy(dir, dir_name), "output.txt"), "w");
 	vis_file = fopen(strcat(strcpy(dir, dir_name), "visualization.csv"), "w");
 	fprintf(vis_file, "#box dimension\n box, %lf\n", MAX_CUBE_DIM);
 	fprintf(vis_file, "#particle radii\n");
 	for(i = 0; i < N; i++)
 	{
-		fprintf(vis_file, "r, %d, %lf\n", i, radius_CPU[i]);
+		fprintf(vis_file, "r, %d, %lf, %lf\n", i, radius_CPU[i], mass_CPU[i]);
 	}
 	for(i = 0; i < N; i++)
 	{
-		fprintf(vis_file, "c, %lf, %d, %lf, %lf, %lf\n", 0.0, i, p_CPU[i].x, p_CPU[i].y, p_CPU[i].z);
+		fprintf(vis_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+					i, 0, tt, 
+					p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
+					0.0, 0.0, 0.0,
+					v_CPU[i].x, v_CPU[i].y, v_CPU[i].z,
+					collision_normal.x, collision_normal.y, collision_normal.z
+			);
 	}
 
 	time = 0;
@@ -1082,17 +1094,6 @@ void n_body()
 
 		check_complex_collisions(&t, t_CPU);
 
-		// Check if particles are dispersed sufficiently 
-		if(burn_in_period > 0)
-		{
-			if( all_particles_diffused > (N - 1) )
-			{
-				tt = 0.0;
-				burn_in_period = time = 0;
-				for(i = 0; i < N; i++) p_collisions[i] = w_collisions_heated[i] = w_collisions_passive[i] = 0.0;
-			}
-		}
-
 		if(visualize) smooth_vis(t);
 		for (i = 0; i < N; i++)
 		{
@@ -1111,15 +1112,17 @@ void n_body()
 
 				for(j = 0; j < n_events; j++)
 				{
-					fprintf(vis_file, "c, %lf, %d, %lf, %lf, %lf\n", tt, collider[j], 
-										p_CPU[ collider[j] ].x, 
-										p_CPU[ collider[j] ].y, 
-										p_CPU[ collider[j] ].z);
+					fprintf(vis_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+						collides[j], collider[j], tt, 
+						p_CPU[collides[j]].x, p_CPU[collides[j]].y, p_CPU[collides[j]].z, 
+						0.0, 0.0, 0.0,
+						v_CPU[collides[j]].x, v_CPU[collides[j]].y, v_CPU[collides[j]].z,
+						collision_normal.x, collision_normal.y, collision_normal.z
+					);
 				}
 			}
 			if(DIMENSION < 3) p_CPU[i].z = v_CPU[i].z = 0.0;
 		}
-
 
 		// update position on GPU to new time step
 		// update velocity on GPU to match CPU 
@@ -1149,9 +1152,14 @@ void n_body()
 
 	for(i = 0; i < N; i++)
 	{
-		fprintf(vis_file, "c, %lf, %d, %lf, %lf, %lf\n", tt, i, p_CPU[i].x, p_CPU[i].y, p_CPU[i].z);
+		fprintf(vis_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+					i, 0, tt, 
+					p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
+					0.0, 0.0, 0.0,
+					v_CPU[i].x, v_CPU[i].y, v_CPU[i].z,
+					collision_normal.x, collision_normal.y, collision_normal.z
+			);
 	}
-	fclose(data_file);
 	fclose(vis_file);
 }
 
