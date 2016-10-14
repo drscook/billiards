@@ -38,7 +38,6 @@ float default_mass = 2.0;
 //non-physical parameters
 int STOP_TIME = 1000;
 int steps_per_record = 50;
-//int visualize = 1;
 int track_large_particle = 0;
 int ignore_particle_interaction;
 int all_particles_diffused = 0;
@@ -112,7 +111,6 @@ void set_macros()
 	//non-physical parameters
 	STOP_TIME = 1000;
 	steps_per_record = 50;
-	//visualize = false;
 	track_large_particle = false;
 	ignore_particle_interaction = false;
 
@@ -134,11 +132,6 @@ void set_macros()
 		fgets(buff,bdim,fp);
 		sscanf(buff, "%d", &d);
 		DIMENSION = d;
-
-		//fgets(buff,bdim,fp);
-		//fgets(buff,bdim,fp);
-		//sscanf(buff, "%d", &d);
-		//visualize = d;
 
 		fgets(buff, bdim, fp);
 		fgets(buff, bdim, fp);
@@ -345,7 +338,6 @@ void set_initial_conditions()
 	int i;
 	set_macros();
 
-	EYE = 2.0 * MAX_CUBE_DIM; // set visualization vantage point
 
 	//CPU MEMORY ALLOCATION
 	p_CPU          = (float3*)malloc(             N * sizeof(float3) );
@@ -1094,15 +1086,12 @@ void n_body()
 
 		check_complex_collisions(&t, t_CPU);
 
-    /*
-		if(visualize) smooth_vis(t);
 		for (i = 0; i < N; i++)
 		{
 			p_CPU[i].x += t_CPU[i] * v_CPU[i].x;
 			p_CPU[i].y += t_CPU[i] * v_CPU[i].y;
 			p_CPU[i].z += t_CPU[i] * v_CPU[i].z;
 		}
-		*/
 
 		for(i = 0; i < N; i++)
 		{
@@ -1170,8 +1159,6 @@ void control()
 {	
 	clock_t time_0, time_1;
 	
-	//if(visualize) draw_picture();
-
 	time_0 = clock();
     	n_body();
 	time_1 = clock();
@@ -1196,8 +1183,6 @@ int main(int argc, char** argv)
 		in_fname = argv[1];
 	}
 	set_initial_conditions();
-
-  //visualize = false;
 
 	control();
 	return 0;
