@@ -36,7 +36,7 @@ float default_radius = 0.1;
 float default_mass = 2.0;
 
 //non-physical parameters
-int STOP_TIME = 1000;
+int MAX_STEPS = 1000;
 int steps_per_record = 50;
 int track_large_particle = 0;
 int ignore_particle_interaction;
@@ -109,7 +109,7 @@ void set_macros()
 	default_mass = 2.0;
 
 	//non-physical parameters
-	STOP_TIME = 1000;
+	MAX_STEPS = 1000;
 	steps_per_record = 50;
 	track_large_particle = false;
 	ignore_particle_interaction = false;
@@ -158,7 +158,7 @@ void set_macros()
 		fgets(buff,bdim,fp);
 		fgets(buff,bdim,fp);
 		sscanf(buff, "%d", &d);
-		STOP_TIME = d;
+		MAX_STEPS = d;
 
 		fgets(buff, bdim, fp);
 		for(i = 0; i < 6; i++)
@@ -921,7 +921,7 @@ void n_body()
 	FILE * data_file;
 	char dir[256];
 	//int burn_in_period = 0
-	int i, j, time, n;
+	int i, j, step, n;
 
 	/*/		OUTPUT FILE STUFF		 /*/
 	data_file = fopen(strcat(strcpy(dir, dir_name), "data.csv"), "w");
@@ -942,9 +942,9 @@ void n_body()
 			);
 	}
 
-	time = 0;
+	step = 0;
 	n = N;
-	while(time++ < STOP_TIME)// || burn_in_period > 0)
+	while(step++ < MAX_STEPS)// || burn_in_period > 0)
 	{
 	  	// on GPU - find smallest time step s.t. any particle(s) collide either 
 	  	// with each other or a wall and update all particles to that time step
@@ -952,7 +952,7 @@ void n_body()
 		find<<<grid, block>>>(p_GPU, v_GPU, radius_GPU, mass_GPU, 
 					tag_GPU, how_many_p_GPU, how_many_w_GPU, what_p_GPU, what_w_GPU, 
 					n, max_walls, MAX_CUBE_DIM, ignore_particle_interaction, t_GPU);
-		errorCheck(time, "find");
+		errorCheck(step, "find");
 
 		//copy minimum time step and index of corresponding colliding element onto CPU 
 		cudaMemcpy( how_many_p_CPU, how_many_p_GPU,             N * sizeof(int  ), cudaMemcpyDeviceToHost);
@@ -1017,15 +1017,15 @@ void n_body()
 				 (p_CPU[i].y * p_CPU[i].y > max_square_displacement[i]) ||
 				 (p_CPU[i].z * p_CPU[i].z > max_square_displacement[i]))
 			{
-				printf("\nError in time %6d: particle %2d escaped!!! last hit %2d %2d %2d\n",
-					time, i, tag_CPU[max_walls * i], tag_CPU[max_walls * i + 1], tag_CPU[max_walls * i + 2]);
-				time = STOP_TIME;
+				printf("\nError in step %6d: particle %2d escaped!!! last hit %2d %2d %2d\n",
+					step, i, tag_CPU[max_walls * i], tag_CPU[max_walls * i + 1], tag_CPU[max_walls * i + 2]);
+				step = MAX_STEPS;
 				break;
 			}
 		}
-		//end of this time step
+		//end of this step
 	}
-	printf("%i gas particles, %.1f timesteps, %.4f seconds in time\n", N, 1.0 * time, tt);
+	printf("%i gas particles, %.1f steps, %.4f seconds in time\n", N, 1.0 * step, tt);
 
 	for(i = 0; i < N; i++)
 	{
