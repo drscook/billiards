@@ -920,7 +920,7 @@ void n_body()
 	float t, tt = 0.0;
 	FILE * data_file;
 	char dir[256];
-	int burn_in_period = 0, i, j, time, n;
+	//int burn_in_period = 0, i, j, time, n;
 
 	/*/		OUTPUT FILE STUFF		 /*/
 	data_file = fopen(strcat(strcpy(dir, dir_name), "data.csv"), "w");
@@ -943,7 +943,7 @@ void n_body()
 
 	time = 0;
 	n = N;
-	while(time++ < STOP_TIME || burn_in_period > 0)
+	while(time++ < STOP_TIME)// || burn_in_period > 0)
 	{
 	  	// on GPU - find smallest time step s.t. any particle(s) collide either 
 	  	// with each other or a wall and update all particles to that time step
