@@ -685,7 +685,7 @@ void resolve_particle_collision(int i0, float time)
 		t = v_CPU[i0];
 		n_events = 1;
 		collides[0] = i0;
-		collider[0] = what_w_CPU[i0];
+		collider[0]=what_w_CPU[max_walls * i0];
 
 		if(how_many_w_CPU[i0] > 1) // if it hits mutliple walls
 		{
