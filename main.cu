@@ -920,7 +920,8 @@ void n_body()
 	float t, tt = 0.0;
 	FILE * data_file;
 	char dir[256];
-	//int burn_in_period = 0, i, j, time, n;
+	//int burn_in_period = 0
+	int i, j, time, n;
 
 	/*/		OUTPUT FILE STUFF		 /*/
 	data_file = fopen(strcat(strcpy(dir, dir_name), "data.csv"), "w");
