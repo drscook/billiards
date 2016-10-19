@@ -1143,9 +1143,10 @@ void control()
 
 void sandbox(float3 a, float3 b)
 {
-  float3 c = a + b;
-  //float d1 = dot(v,w);
-  //printf("%lf",d1);
+  //float3 c = a + b;
+  float d1;
+  d1 = dot(v,w);
+  printf("%lf",d1);
   //z = v+w;
   //d2 = z.w
   //printf("%lf",d2);
@@ -1153,8 +1154,8 @@ void sandbox(float3 a, float3 b)
 
 int main(int argc, char** argv)
 {
-  float3 a = float3(-1.0, 2.0, 3.0);
-  float3 b = float3(1.0, -4.0, 7.0);
+  float3 a;
+  float3 b;
 	//glutInit(&argc,argv);
 
 	//now that glut commands have been stripped from the 
@@ -1168,6 +1169,12 @@ int main(int argc, char** argv)
 	}
 
 	//control();
+	a[1] = -1.0;
+	a[2] = 2.0;
+	a[3] = 3.0;
+	b[1] = 1.0;
+	b[2] = -4.0;
+	b[3] = 7.0;
 	sandbox(a,b);
 	return 0;
 }
