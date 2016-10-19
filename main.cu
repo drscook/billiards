@@ -1141,7 +1141,7 @@ float dot(float3 v, float3 w)
 }
 
 
-void sandbox(float3 v, float3 w);
+void sandbox(float3 v, float3 w)
 {
   float d1,d2;
   d1 = v.w;
