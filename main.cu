@@ -1140,9 +1140,13 @@ float dot(float3 a, float3 b)
   return(a.x*b.x + a.y*b.y + a.z*b.z);
 }
 
-float vadd(float3 a, float3 b)
+float3 vadd(float3 a, float3 b)
 {
-  return(float3(a.x+b.x, a.y+b.y, a-z+b.z));
+  float3 c;
+  c.x = a.x+b.x;
+  c.y = a.y+b.y;
+  c.z = a.z+b.z;
+  return(c);
 }
 
 void sandbox(float3 a, float3 b)
