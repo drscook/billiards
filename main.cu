@@ -937,8 +937,8 @@ void check_complex_collisions(float * t, float * particle_t)
 void compute_thermo(int rec, float mass, float3 v_in, float3 v_out, float3 normal)
 {
   float P;
-  impulse = mass * (dot(v_out,normal) - dot(v_in,normal));
-  printf("%lf",P);
+  /impulse = mass * (dot(v_out,normal) - dot(v_in,normal));
+  /printf("%lf",P);
 }
 
 
@@ -1135,16 +1135,16 @@ void control()
 
 
 
-float dot(float3 v, float3 w)
-{
-  return(v.x*w.x + v.y*w.y + v.z*w.z);
-}
+//float dot(float3 v, float3 w)
+//{
+//  return(v.x*w.x + v.y*w.y + v.z*w.z);
+//}
 
 
 void sandbox(float3 v, float3 w)
 {
   float d1,d2;
-  d1 = v.w;
+  d1 = dot(v,w);
   printf("%lf",d1);
   z = v+w;
   d2 = z.w
