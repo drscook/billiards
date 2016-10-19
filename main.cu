@@ -931,12 +931,17 @@ void check_complex_collisions(float * t, float * particle_t)
 }
 
 
-
-
-
-
-void compute_thermo(float3 v_in,float3 v_out,float3   normal)
+float dot(float3 v, float3 w)
 {
+  return(v.x*w.x + v.y*w.y + v.z*w.z)
+}
+
+
+
+void compute_thermo(int rec, float3 v_in, float3 v_out, float3 normal)
+{
+  P = dot(v_in,normal);
+  printf(P);
 }
 
 
@@ -975,8 +980,6 @@ void n_body()
 
 
   /*/  DO THE EVOLUTION /*/
-	step = 0;
-	n = N;
 	
 	/*
 
@@ -996,7 +999,9 @@ void n_body()
 	}
 	*/
 	
-	
+	step = 0;
+	rec = 0;
+	n = N;
 	while(step++ < smart_max_steps)
 	//while(step++ < MAX_STEPS)// || burn_in_period > 0)
 	{
@@ -1048,7 +1053,11 @@ void n_body()
 				  v_in.y = v_CPU[i].y;
 				  v_in.z = v_CPU[i].z;
 				  resolve_particle_collision(i, t_CPU[i]);
-				  compute_thermo(v_in,v_CPU[i],collision_normal);
+				  compute_thermo(rec,v_in,v_CPU[i],collision_normal);
+				  
+				  
+				  rec++;
+				  if(rec>=hist_length) rec=0;
 				}
 				else
 				{
