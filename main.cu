@@ -932,6 +932,21 @@ void check_complex_collisions(float * t, float * particle_t)
 
 
 
+float dot(float3 a, float3 b)
+{
+  return(a.x*b.x + a.y*b.y + a.z*b.z);
+}
+
+float3 vadd(float3 a, float3 b)
+{
+  float3 c;
+  c.x = a.x+b.x;
+  c.y = a.y+b.y;
+  c.z = a.z+b.z;
+  return(c);
+}
+
+
 
 
 void compute_thermo(int rec, float mass, float3 v_in, float3 v_out, float3 normal)
@@ -1135,23 +1150,9 @@ void control()
 
 
 
-float dot(float3 a, float3 b)
-{
-  return(a.x*b.x + a.y*b.y + a.z*b.z);
-}
-
-float3 vadd(float3 a, float3 b)
-{
-  float3 c;
-  c.x = a.x+b.x;
-  c.y = a.y+b.y;
-  c.z = a.z+b.z;
-  return(c);
-}
 
 void sandbox(float3 a, float3 b)
 {
-  //float3 c = a + b;
   float d1;
   d1 = dot(a,b);
   printf("%lf",d1);
@@ -1162,8 +1163,6 @@ void sandbox(float3 a, float3 b)
 
 int main(int argc, char** argv)
 {
-  float3 a;
-  float3 b;
 	//glutInit(&argc,argv);
 
 	//now that glut commands have been stripped from the 
@@ -1176,14 +1175,7 @@ int main(int argc, char** argv)
 		in_fname = argv[1];
 	}
 
-	//control();
-	a.x = -1.0;
-	a.y = 2.0;
-	a.z = 3.0;
-	b.x = 1.0;
-	b.y = -4.0;
-	b.z = 7.0;
-	sandbox(a,b);
+	control();
 	return 0;
 }
 
