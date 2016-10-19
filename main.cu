@@ -935,7 +935,7 @@ void check_complex_collisions(float * t, float * particle_t)
 
 
 
-void compute_thermo(v_in,v_out,normal)
+void compute_thermo(float3 v_in,float3 v_out,normal)
 {
 }
 
