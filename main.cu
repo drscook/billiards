@@ -34,6 +34,8 @@ dim3 block, grid;
 int DIMENSION = 3;
 int N = 10;
 float MAX_CUBE_DIM = 2.0;
+float surface_area;
+float vol;
 float default_radius = 0.1;
 float default_mass = 2.0;
 
@@ -366,6 +368,8 @@ void set_initial_conditions()
 
 
 	// set up wall parameters for box
+	surface_area = 6*((2*MAX_CUBE_DIM)**2);
+	vol = (2*MAX_CUBE_DIM)**3;
 	max_temp = min_temp = 0.0; // average temperature of walls
 	for(i = 0; i < 6; i++)
 	{
@@ -949,10 +953,12 @@ float3 vadd(float3 a, float3 b)
 
 
 
-void compute_thermo(int rec, float mass, float3 v_in, float3 v_out, float3 normal)
+void compute_thermo(float t_tot, int rec, float mass, float3 v_in, float3 v_out, float3 normal)
 {
   float impulse;
   impulse = mass * (dot(v_out,normal) - dot(v_in,normal));
+  impulse_cumsum += impulse;
+  pressure[rec] = (impulse_cumsum / t_tot) / surface_area;
   printf("%lf",impulse);
 }
 
@@ -961,7 +967,7 @@ void compute_thermo(int rec, float mass, float3 v_in, float3 v_out, float3 norma
 
 void n_body()
 {
-	float t, tt = 0.0;
+	float t_step, t_tot = 0.0;
 	FILE * viz_file;
 	FILE * thermo_file;
 	char dir[256];
@@ -982,7 +988,7 @@ void n_body()
 	for(i = 0; i < N; i++)
 	{
 		fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
-					i, 0, tt, 
+					i, 0, t_tot, 
 					p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
 					0.0, 0.0, 0.0,
 					v_CPU[i].x, v_CPU[i].y, v_CPU[i].z,
@@ -1032,16 +1038,16 @@ void n_body()
 		cudaMemcpy(     what_w_CPU,     what_w_GPU, max_walls * N * sizeof(int  ), cudaMemcpyDeviceToHost);
 		cudaMemcpy(          t_CPU,          t_GPU,             N * sizeof(float), cudaMemcpyDeviceToHost);
 
-		find_min_dt(t_CPU, &t);
+		find_min_dt(t_CPU, &t_step);
 
 		// if no collisions were detected, we are done. 
-		if(t < 0.0)
+		if(t_step < 0.0)
 		{
 			printf("\nEND: NO MORE COLLISIONS\n");
 			break;
 		}
 
-		check_complex_collisions(&t, t_CPU);
+		check_complex_collisions(&t_step, t_CPU);
 
 		//UPDATE POSITIONS
 		for (i = 0; i < N; i++)
@@ -1050,7 +1056,7 @@ void n_body()
 			p_CPU[i].y += t_CPU[i] * v_CPU[i].y;
 			p_CPU[i].z += t_CPU[i] * v_CPU[i].z;
 		}
-
+    t_tot += t_step;
 
 		for(i = 0; i < N; i++)
 		{
@@ -1066,7 +1072,7 @@ void n_body()
 				  //v_in.z = v_CPU[i].z;
 				  v_in = v_CPU[i];
 				  resolve_particle_collision(i, t_CPU[i]);
-				  compute_thermo(rec,mass_CPU[i],v_in,v_CPU[i],collision_normal);
+				  compute_thermo(t_tot,rec,mass_CPU[i],v_in,v_CPU[i],collision_normal);
 				  
 				  
 				  rec++;
@@ -1082,7 +1088,7 @@ void n_body()
 				for(j = 0; j < n_events; j++)
 				{
 					fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
-						collides[j], collider[j], tt, 
+						collides[j], collider[j], t_tot, 
 						p_CPU[collides[j]].x, p_CPU[collides[j]].y, p_CPU[collides[j]].z, 
 						0.0, 0.0, 0.0,
 						v_CPU[collides[j]].x, v_CPU[collides[j]].y, v_CPU[collides[j]].z,
@@ -1100,7 +1106,7 @@ void n_body()
 		cudaMemcpy(   v_GPU,   v_CPU,             N * sizeof(float3), cudaMemcpyHostToDevice );
 		cudaMemcpy( tag_GPU, tag_CPU, max_walls * N * sizeof(int   ), cudaMemcpyHostToDevice );
 
-		tt += t;
+		
 
 		//fireproofing: check at each time step that no particles escaped.
 		for (i = 0; i < N; i++)
@@ -1123,7 +1129,7 @@ void n_body()
 	for(i = 0; i < N; i++)
 	{
 		fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
-					i, 0, tt, 
+					i, 0, t_tot, 
 					p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
 					0.0, 0.0, 0.0,
 					v_CPU[i].x, v_CPU[i].y, v_CPU[i].z,
@@ -1131,7 +1137,7 @@ void n_body()
 			);
 	}
 	fclose(viz_file);
-	printf("%i gas particles, %.1f steps, %.4f seconds in time\n", N, 1.0 * step, tt);
+	printf("%i gas particles, %.1f steps, %.4f seconds in time\n", N, 1.0 * step, t_tot);
 }
 
 
