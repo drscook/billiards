@@ -935,33 +935,36 @@ void check_complex_collisions(float * t, float * particle_t)
 
 
 
-void compute_thermo()
+void compute_thermo(v_in,v_out,normal)
 {
-  
-
 }
+
 
 
 
 void n_body()
 {
 	float t, tt = 0.0;
-	FILE * data_file;
+	FILE * viz_file;
+	FILE * thermo_file;
 	char dir[256];
 	//int burn_in_period = 0
 	int i, j, step, n;
+	int smart_max_steps = MAX_steps;
+	int smart_stop_found = 0;
+	float3 v_in;
 
-	/*/		OUTPUT FILE STUFF		 /*/
-	data_file = fopen(strcat(strcpy(dir, dir_name), "data.csv"), "w");
-	fprintf(data_file, "#box dimension\n box, %lf\n", MAX_CUBE_DIM);
-	fprintf(data_file, "#particle radii\n");
+	/*/		WRITE INITIAL CONDITION TO FILE		 /*/
+	viz_file = fopen(strcat(strcpy(dir, dir_name), "viz.csv"), "w");
+	fprintf(viz_file, "#box dimension\n box, %lf\n", MAX_CUBE_DIM);
+	fprintf(viz_file, "#particle radii\n");
 	for(i = 0; i < N; i++)
 	{
-		fprintf(data_file, "r, %d, %lf, %lf\n", i, radius_CPU[i], mass_CPU[i]);
+		fprintf(viz_file, "r, %d, %lf, %lf\n", i, radius_CPU[i], mass_CPU[i]);
 	}
 	for(i = 0; i < N; i++)
 	{
-		fprintf(data_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+		fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
 					i, 0, tt, 
 					p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
 					0.0, 0.0, 0.0,
@@ -970,13 +973,13 @@ void n_body()
 			);
 	}
 
+
+  /*/  DO THE EVOLUTION /*/
 	step = 0;
 	n = N;
 	
 	/*
-	smart_max_steps = MAX_STEPS
-	smart_stop_found = False
-	
+
 	while(step++ < smart_max_steps)
 	{
 	  do the evolution
@@ -993,7 +996,9 @@ void n_body()
 	}
 	*/
 	
-	while(step++ < MAX_STEPS)// || burn_in_period > 0)
+	
+	while(step++ < smart_max_steps)
+	//while(step++ < MAX_STEPS)// || burn_in_period > 0)
 	{
 	  	// on GPU - find smallest time step s.t. any particle(s) collide either 
 	  	// with each other or a wall and update all particles to that time step
@@ -1021,6 +1026,7 @@ void n_body()
 
 		check_complex_collisions(&t, t_CPU);
 
+		//UPDATE POSITIONS
 		for (i = 0; i < N; i++)
 		{
 			p_CPU[i].x += t_CPU[i] * v_CPU[i].x;
@@ -1028,17 +1034,32 @@ void n_body()
 			p_CPU[i].z += t_CPU[i] * v_CPU[i].z;
 		}
 
+
 		for(i = 0; i < N; i++)
 		{
+		  //SELECTS ONLY PARTICLES INVOLVED IN THIS EVENT
 			if( how_many_p_CPU[i] > 0 || how_many_w_CPU[i] > 0)
 			{
 				n_events = 0;
 
-				resolve_particle_collision(i, t_CPU[i]);
-
+				if(how_many_w_CPU[i]>0)
+				{
+				  v_in.x = v_CPU[i].x;
+				  v_in.y = v_CPU[i].y;
+				  v_in.z = v_CPU[i].z;
+				  resolve_particle_collision(i, t_CPU[i]);
+				  compute_thermo(v_in,v_CPU[i],collision_normal);
+				}
+				else
+				{
+				  resolve_particle_collision(i, t_CPU[i]);
+				}
+				
+				
+        //WRITE TO FILE
 				for(j = 0; j < n_events; j++)
 				{
-					fprintf(data_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+					fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
 						collides[j], collider[j], tt, 
 						p_CPU[collides[j]].x, p_CPU[collides[j]].y, p_CPU[collides[j]].z, 
 						0.0, 0.0, 0.0,
@@ -1074,11 +1095,12 @@ void n_body()
 		}
 		//end of this step
 	}
-	printf("%i gas particles, %.1f steps, %.4f seconds in time\n", N, 1.0 * step, tt);
-
+	
+	
+	/*/  WRITE FINAL CONDITIONS TO FILE /*/
 	for(i = 0; i < N; i++)
 	{
-		fprintf(data_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+		fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
 					i, 0, tt, 
 					p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
 					0.0, 0.0, 0.0,
@@ -1086,7 +1108,8 @@ void n_body()
 					collision_normal.x, collision_normal.y, collision_normal.z
 			);
 	}
-	fclose(data_file);
+	fclose(viz_file);
+	printf("%i gas particles, %.1f steps, %.4f seconds in time\n", N, 1.0 * step, tt);
 }
 
 
@@ -1095,6 +1118,7 @@ void control()
 	clock_t time_0, time_1;
 	
 	time_0 = clock();
+	    set_initial_conditions();
     	n_body();
 	time_1 = clock();
 	
@@ -1117,7 +1141,6 @@ int main(int argc, char** argv)
 	{
 		in_fname = argv[1];
 	}
-	set_initial_conditions();
 
 	control();
 	return 0;
