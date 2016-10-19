@@ -935,7 +935,7 @@ void check_complex_collisions(float * t, float * particle_t)
 
 
 
-void compute_thermo(float3 v_in,float3 v_out,normal)
+void compute_thermo(float3 v_in,float3 v_out,float3   normal)
 {
 }
 
@@ -950,7 +950,7 @@ void n_body()
 	char dir[256];
 	//int burn_in_period = 0
 	int i, j, step, n;
-	int smart_max_steps = MAX_steps;
+	int smart_max_steps = MAX_STEPS;
 	int smart_stop_found = 0;
 	float3 v_in;
 
