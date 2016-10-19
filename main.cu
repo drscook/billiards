@@ -1135,11 +1135,15 @@ void control()
 
 
 
-float dot(float3 v, float3 w)
+float dot(float3 a, float3 b)
 {
-  return(v.x*w.x + v.y*w.y + v.z*w.z);
+  return(a.x*b.x + a.y*b.y + a.z*b.z);
 }
 
+float vadd(float3 a, float3 b)
+{
+  return(float3(a.x+b.x, a.y+b.y, a-z+b.z));
+}
 
 void sandbox(float3 a, float3 b)
 {
@@ -1147,7 +1151,7 @@ void sandbox(float3 a, float3 b)
   float d1;
   d1 = dot(a,b);
   printf("%lf",d1);
-  //z = v+w;
+  //float3 c = a+b;
   //d2 = z.w
   //printf("%lf",d2);
 }
