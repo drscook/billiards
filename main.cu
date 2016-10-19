@@ -1165,7 +1165,7 @@ int main(int argc, char** argv)
 	}
 
 	//control();
-	sandbox();
+	sandbox(float3(1.0,2.0,3.0),float3(4.0,-5.0,6.0));
 	return 0;
 }
 
