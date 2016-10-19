@@ -951,9 +951,9 @@ float3 vadd(float3 a, float3 b)
 
 void compute_thermo(int rec, float mass, float3 v_in, float3 v_out, float3 normal)
 {
-  float P;
-  //impulse = mass * (dot(v_out,normal) - dot(v_in,normal));
-  //printf("%lf",P);
+  float impulse;
+  impulse = mass * (dot(v_out,normal) - dot(v_in,normal));
+  printf("%lf",P);
 }
 
 
