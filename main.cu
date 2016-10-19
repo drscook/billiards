@@ -931,17 +931,13 @@ void check_complex_collisions(float * t, float * particle_t)
 }
 
 
-float dot(float3 v, float3 w)
-{
-  return(v.x*w.x + v.y*w.y + v.z*w.z);
-}
 
 
 
-void compute_thermo(int rec, float3 v_in, float3 v_out, float3 normal)
+void compute_thermo(int rec, float mass, float3 v_in, float3 v_out, float3 normal)
 {
   float P;
-  P = dot(v_in,normal);
+  impulse = mass * (dot(v_out,normal) - dot(v_in,normal));
   printf("%lf",P);
 }
 
@@ -1050,11 +1046,12 @@ void n_body()
 
 				if(how_many_w_CPU[i]>0)
 				{
-				  v_in.x = v_CPU[i].x;
-				  v_in.y = v_CPU[i].y;
-				  v_in.z = v_CPU[i].z;
+				  //v_in.x = v_CPU[i].x;
+				  //v_in.y = v_CPU[i].y;
+				  //v_in.z = v_CPU[i].z;
+				  v_in = v_CPU[i];
 				  resolve_particle_collision(i, t_CPU[i]);
-				  compute_thermo(rec,v_in,v_CPU[i],collision_normal);
+				  compute_thermo(rec,mass_CPU[i],v_in,v_CPU[i],collision_normal);
 				  
 				  
 				  rec++;
@@ -1138,6 +1135,21 @@ void control()
 
 
 
+float dot(float3 v, float3 w)
+{
+  return(v.x*w.x + v.y*w.y + v.z*w.z);
+}
+
+
+void sandbox(float3 v, float3 w);
+{
+  d1 = v.w;
+  printf("%lf",d1);
+  z = v+w;
+  d2 = z.w
+  printf("%lf",d2);
+}
+
 int main(int argc, char** argv)
 {
 	//glutInit(&argc,argv);
@@ -1152,7 +1164,8 @@ int main(int argc, char** argv)
 		in_fname = argv[1];
 	}
 
-	control();
+	//control();
+	sandbox();
 	return 0;
 }
 
