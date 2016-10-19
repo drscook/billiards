@@ -196,91 +196,6 @@ void read_input_file()
 }
 
 
-
-
-void set_initial_conditions()
-{
-	int i;
-	read_input_file();
-
-
-	//CPU MEMORY ALLOCATION
-	p_CPU          = (float3*)malloc(             N * sizeof(float3) );
-	v_CPU          = (float3*)malloc(             N * sizeof(float3) );
-	radius_CPU     = (float* )malloc(             N * sizeof(float ) );
-	max_square_displacement = (float*)malloc(N * sizeof(float));
-	mass_CPU       = (float* )malloc(             N * sizeof(float ) );
-	t_CPU          = (float* )malloc(             N * sizeof(float ) );
-	p_temp_CPU     = (float* )malloc(             N * sizeof(float ) );
-	tag_CPU        = (int*   )malloc( max_walls * N * sizeof(int   ) );
-	how_many_p_CPU = (int*   )malloc(             N * sizeof(int   ) );
-	how_many_w_CPU = (int*   )malloc(             N * sizeof(int   ) );
-	what_p_CPU     = (int*   )malloc(             N * sizeof(int   ) );
-	what_w_CPU     = (int*   )malloc( max_walls * N * sizeof(int   ) );
-	p_collisions   = (float* )malloc(             N * sizeof(float ) );
-	w_collisions_heated = (float* )malloc(        N * sizeof(float ) );
-	w_collisions_passive= (float* )malloc(        N * sizeof(float ) );
-
-	// GPU MEMORY ALLOCATION
-	block.x = 512;
-	block.y = 1;
-	block.z = 1;
-
-	grid.x = (N - 1) / block.x + 1;
-	grid.y = 1;
-	grid.z = 1;
-
-	cudaMalloc( (void**)&p_GPU,       N *sizeof(float3) );
-	cudaMalloc( (void**)&v_GPU,       N *sizeof(float3) );
-	cudaMalloc( (void**)&radius_GPU,  N *sizeof(float ) );
-	cudaMalloc( (void**)&mass_GPU,    N *sizeof(float ) );
-
-	cudaMalloc( (void**)&tag_GPU,    max_walls * N *sizeof(int  ) );
-	cudaMalloc( (void**)&t_GPU,                  N *sizeof(float) );
-	cudaMalloc( (void**)&how_many_p_GPU,         N *sizeof(int  ) );
-	cudaMalloc( (void**)&how_many_w_GPU,         N *sizeof(int  ) );
-	cudaMalloc( (void**)&what_p_GPU,             N *sizeof(int  ) );
-	cudaMalloc( (void**)&what_w_GPU, max_walls * N *sizeof(int  ) );
-
-
-
-	// set up wall parameters for box
-	max_temp = min_temp = 0.0; // average temperature of walls
-	for(i = 0; i < 6; i++)
-	{
-		max_temp = MAX(max_temp, WALL_TEMP[i][0]);
-		min_temp = MIN(min_temp, WALL_TEMP[i][0]);
-	}
-	default_p_temp = (max_temp + min_temp) / 2.0;
-
-	//set entropy and collisions to 0
-	for (i = 0; i < 6; i++){ alpha[i] = 1.0;}
-
-	//normal vectors to walls 
-	normal[0].x = 1.0; normal[0].y = 0.0; normal[0].z = 0.0;
-	normal[2].x = 0.0; normal[2].y = 1.0; normal[2].z = 0.0;
-	normal[4].x = 0.0; normal[4].y = 0.0; normal[4].z = 1.0;
-	normal[1].x =-1.0; normal[1].y = 0.0; normal[1].z = 0.0;
-	normal[3].x = 0.0; normal[3].y =-1.0; normal[3].z = 0.0;
-	normal[5].x = 0.0; normal[5].y = 0.0; normal[5].z =-1.0;
-
-	// set up particle parameters
-	pack_particles();
-	//compute_t();
-
-	// copy CPU initialization to GPU
-	cudaMemcpy( p_GPU,      p_CPU,                  N *sizeof(float3), cudaMemcpyHostToDevice );
-	cudaMemcpy( v_GPU,      v_CPU,                  N *sizeof(float3), cudaMemcpyHostToDevice );
-	cudaMemcpy( mass_GPU,   mass_CPU,               N *sizeof(float ), cudaMemcpyHostToDevice );
-	cudaMemcpy( radius_GPU, radius_CPU,             N *sizeof(float ), cudaMemcpyHostToDevice );
-	cudaMemcpy( tag_GPU,    tag_CPU,    max_walls * N *sizeof(int   ), cudaMemcpyHostToDevice );
-
-}
-
-
-
-
-
 //initialize particles with position, velcoity, radius, etc. 
 void pack_particles()
 {
@@ -400,6 +315,93 @@ void pack_particles()
 		p_collisions[i] = w_collisions_heated[i] = w_collisions_passive[i] = 0.0;
 	}
 }
+
+
+
+
+void set_initial_conditions()
+{
+	int i;
+	read_input_file();
+
+
+	//CPU MEMORY ALLOCATION
+	p_CPU          = (float3*)malloc(             N * sizeof(float3) );
+	v_CPU          = (float3*)malloc(             N * sizeof(float3) );
+	radius_CPU     = (float* )malloc(             N * sizeof(float ) );
+	max_square_displacement = (float*)malloc(N * sizeof(float));
+	mass_CPU       = (float* )malloc(             N * sizeof(float ) );
+	t_CPU          = (float* )malloc(             N * sizeof(float ) );
+	p_temp_CPU     = (float* )malloc(             N * sizeof(float ) );
+	tag_CPU        = (int*   )malloc( max_walls * N * sizeof(int   ) );
+	how_many_p_CPU = (int*   )malloc(             N * sizeof(int   ) );
+	how_many_w_CPU = (int*   )malloc(             N * sizeof(int   ) );
+	what_p_CPU     = (int*   )malloc(             N * sizeof(int   ) );
+	what_w_CPU     = (int*   )malloc( max_walls * N * sizeof(int   ) );
+	p_collisions   = (float* )malloc(             N * sizeof(float ) );
+	w_collisions_heated = (float* )malloc(        N * sizeof(float ) );
+	w_collisions_passive= (float* )malloc(        N * sizeof(float ) );
+
+	// GPU MEMORY ALLOCATION
+	block.x = 512;
+	block.y = 1;
+	block.z = 1;
+
+	grid.x = (N - 1) / block.x + 1;
+	grid.y = 1;
+	grid.z = 1;
+
+	cudaMalloc( (void**)&p_GPU,       N *sizeof(float3) );
+	cudaMalloc( (void**)&v_GPU,       N *sizeof(float3) );
+	cudaMalloc( (void**)&radius_GPU,  N *sizeof(float ) );
+	cudaMalloc( (void**)&mass_GPU,    N *sizeof(float ) );
+
+	cudaMalloc( (void**)&tag_GPU,    max_walls * N *sizeof(int  ) );
+	cudaMalloc( (void**)&t_GPU,                  N *sizeof(float) );
+	cudaMalloc( (void**)&how_many_p_GPU,         N *sizeof(int  ) );
+	cudaMalloc( (void**)&how_many_w_GPU,         N *sizeof(int  ) );
+	cudaMalloc( (void**)&what_p_GPU,             N *sizeof(int  ) );
+	cudaMalloc( (void**)&what_w_GPU, max_walls * N *sizeof(int  ) );
+
+
+
+	// set up wall parameters for box
+	max_temp = min_temp = 0.0; // average temperature of walls
+	for(i = 0; i < 6; i++)
+	{
+		max_temp = MAX(max_temp, WALL_TEMP[i][0]);
+		min_temp = MIN(min_temp, WALL_TEMP[i][0]);
+	}
+	default_p_temp = (max_temp + min_temp) / 2.0;
+
+	//set entropy and collisions to 0
+	for (i = 0; i < 6; i++){ alpha[i] = 1.0;}
+
+	//normal vectors to walls 
+	normal[0].x = 1.0; normal[0].y = 0.0; normal[0].z = 0.0;
+	normal[2].x = 0.0; normal[2].y = 1.0; normal[2].z = 0.0;
+	normal[4].x = 0.0; normal[4].y = 0.0; normal[4].z = 1.0;
+	normal[1].x =-1.0; normal[1].y = 0.0; normal[1].z = 0.0;
+	normal[3].x = 0.0; normal[3].y =-1.0; normal[3].z = 0.0;
+	normal[5].x = 0.0; normal[5].y = 0.0; normal[5].z =-1.0;
+
+	// set up particle parameters
+	pack_particles();
+	//compute_t();
+
+	// copy CPU initialization to GPU
+	cudaMemcpy( p_GPU,      p_CPU,                  N *sizeof(float3), cudaMemcpyHostToDevice );
+	cudaMemcpy( v_GPU,      v_CPU,                  N *sizeof(float3), cudaMemcpyHostToDevice );
+	cudaMemcpy( mass_GPU,   mass_CPU,               N *sizeof(float ), cudaMemcpyHostToDevice );
+	cudaMemcpy( radius_GPU, radius_CPU,             N *sizeof(float ), cudaMemcpyHostToDevice );
+	cudaMemcpy( tag_GPU,    tag_CPU,    max_walls * N *sizeof(int   ), cudaMemcpyHostToDevice );
+
+}
+
+
+
+
+
 
 
 
@@ -930,20 +932,7 @@ void check_complex_collisions(float * t, float * particle_t)
 
 
 
-// compute gas temperature based on kinetic energy of particles
-void compute_t()
-{
-	int i;
-	gas_temp = 0.0;
 
-	for(i = 0; i < N; i++)
-	{
-		p_temp_CPU[i] = mass_CPU[i] * (v_CPU[i].x * v_CPU[i].x + v_CPU[i].y * v_CPU[i].y + v_CPU[i].z * v_CPU[i].z)
-				/ (1.0 * DIMENSION * BOLTZ_CONST);
-		gas_temp += p_temp_CPU[i];
-	}
-	gas_temp /= (1.0 * N);
-}
 
 
 void compute_thermo()
@@ -983,6 +972,8 @@ void n_body()
 
 	step = 0;
 	n = N;
+	
+	/*
 	smart_max_steps = MAX_STEPS
 	smart_stop_found = False
 	
@@ -1000,6 +991,7 @@ void n_body()
 	  }
 	
 	}
+	*/
 	
 	while(step++ < MAX_STEPS)// || burn_in_period > 0)
 	{
@@ -1132,7 +1124,25 @@ int main(int argc, char** argv)
 }
 
 
+/*
 
+// compute gas temperature based on kinetic energy of particles
+void compute_t()
+{
+	int i;
+	gas_temp = 0.0;
+
+	for(i = 0; i < N; i++)
+	{
+		p_temp_CPU[i] = mass_CPU[i] * (v_CPU[i].x * v_CPU[i].x + v_CPU[i].y * v_CPU[i].y + v_CPU[i].z * v_CPU[i].z)
+				/ (1.0 * DIMENSION * BOLTZ_CONST);
+		gas_temp += p_temp_CPU[i];
+	}
+	gas_temp /= (1.0 * N);
+}
+
+
+*/
 
 
 
