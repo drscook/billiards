@@ -942,7 +942,7 @@ void compute_thermo(int rec, float3 v_in, float3 v_out, float3 normal)
 {
   float P;
   P = dot(v_in,normal);
-  printf(P);
+  printf("%lf",P);
 }
 
 
