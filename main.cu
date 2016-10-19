@@ -933,13 +933,14 @@ void check_complex_collisions(float * t, float * particle_t)
 
 float dot(float3 v, float3 w)
 {
-  return(v.x*w.x + v.y*w.y + v.z*w.z)
+  return(v.x*w.x + v.y*w.y + v.z*w.z);
 }
 
 
 
 void compute_thermo(int rec, float3 v_in, float3 v_out, float3 normal)
 {
+  float P;
   P = dot(v_in,normal);
   printf(P);
 }
@@ -954,7 +955,7 @@ void n_body()
 	FILE * thermo_file;
 	char dir[256];
 	//int burn_in_period = 0
-	int i, j, step, n;
+	int i, j, step, rec, n;
 	int smart_max_steps = MAX_STEPS;
 	int smart_stop_found = 0;
 	float3 v_in;
