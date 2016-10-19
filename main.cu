@@ -1155,8 +1155,8 @@ void sandbox(float3 a, float3 b)
   float d1;
   d1 = dot(a,b);
   printf("%lf",d1);
-  float3 c = a+b;
-  d2 = dot(a,c);
+  float3 c = vadd(a,b);
+  float d2 = dot(a,c);
   printf("%lf",d2);
 }
 
