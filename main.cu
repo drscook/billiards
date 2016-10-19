@@ -368,8 +368,8 @@ void set_initial_conditions()
 
 
 	// set up wall parameters for box
-	surface_area = 6*((2*MAX_CUBE_DIM)**2);
-	vol = (2*MAX_CUBE_DIM)**3;
+	surface_area = 6*(2*MAX_CUBE_DIM)*(2*MAX_CUBE_DIM);
+	vol = (2*MAX_CUBE_DIM)*(2*MAX_CUBE_DIM)*(2*MAX_CUBE_DIM);
 	max_temp = min_temp = 0.0; // average temperature of walls
 	for(i = 0; i < 6; i++)
 	{
