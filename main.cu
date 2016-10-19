@@ -953,7 +953,7 @@ void compute_thermo(int rec, float mass, float3 v_in, float3 v_out, float3 norma
 {
   float impulse;
   impulse = mass * (dot(v_out,normal) - dot(v_in,normal));
-  printf("%lf",P);
+  printf("%lf",impulse);
 }
 
 
