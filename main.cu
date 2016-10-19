@@ -1169,12 +1169,12 @@ int main(int argc, char** argv)
 	}
 
 	//control();
-	a[1] = -1.0;
-	a[2] = 2.0;
-	a[3] = 3.0;
-	b[1] = 1.0;
-	b[2] = -4.0;
-	b[3] = 7.0;
+	a.x = -1.0;
+	a.y = 2.0;
+	a.z = 3.0;
+	b.x = 1.0;
+	b.y = -4.0;
+	b.z = 7.0;
 	sandbox(a,b);
 	return 0;
 }
