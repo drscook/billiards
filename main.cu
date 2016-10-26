@@ -154,7 +154,7 @@ class Thermo_Record {
 
 
 float impulse_sum = 0.0;
-pressure = Thermo(hist_length);
+pressure = Thermo_Record(hist_length);
 
 
 
@@ -1022,7 +1022,9 @@ float3 vadd(float3 a, float3 b)
 
 void compute_thermo(float t_tot, float mass, float3 v_in, float3 v_out, float3 normal)
 {
-  impulse_sum += mass * (dot(v_out,normal) - dot(v_in,normal));
+  float impulse, P;
+  impulse = mass * (dot(v_out,normal) - dot(v_in,normal));
+  impulse_sum += impulse;
   P = (impulse_sum / t_tot) / surface_area;
   pressure.update[P];
 }
