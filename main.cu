@@ -179,7 +179,7 @@ void compute_thermo(float t_tot, float mass, float3 v_in, float3 v_out, float3 n
   impulse = mass * (dot(v_out,normal) - dot(v_in,normal));
   impulse_sum += impulse;
   P = (impulse_sum / t_tot) / surface_area;
-  pressure.update[P];
+  pressure.update(P);
 }
 
 
