@@ -154,7 +154,8 @@ class Thermo_Record {
 
 
 float impulse_sum = 0.0;
-pressure = Thermo_Record(1000);
+#pressure = Thermo_Record(1000);
+Thermo_Record pressure(1000);
 
 
 
