@@ -158,6 +158,21 @@ float impulse_sum = 0.0;
 Thermo_Record pressure = Thermo_Record(1000);
 
 
+float dot(float3 a, float3 b)
+{
+  return(a.x*b.x + a.y*b.y + a.z*b.z);
+}
+
+float3 vadd(float3 a, float3 b)
+{
+  float3 c;
+  c.x = a.x+b.x;
+  c.y = a.y+b.y;
+  c.z = a.z+b.z;
+  return(c);
+}
+
+
 void compute_thermo(float t_tot, float mass, float3 v_in, float3 v_out, float3 normal)
 {
   float impulse, P;
@@ -1012,19 +1027,6 @@ void check_complex_collisions(float * t, float * particle_t)
 
 
 
-float dot(float3 a, float3 b)
-{
-  return(a.x*b.x + a.y*b.y + a.z*b.z);
-}
-
-float3 vadd(float3 a, float3 b)
-{
-  float3 c;
-  c.x = a.x+b.x;
-  c.y = a.y+b.y;
-  c.z = a.z+b.z;
-  return(c);
-}
 
 
 
