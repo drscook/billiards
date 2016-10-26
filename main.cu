@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <random>
 
+
+
 //openGL vis parameters
 #define XWindowSize 2500
 #define YWindowSize 2500
@@ -92,11 +94,74 @@ int *how_many_p_CPU, *how_many_p_GPU;
 int *how_many_w_CPU, *how_many_w_GPU;
 
 
-//thermodynamical quantities
 
-float impulse_cumsum = 0.0;
-float gas_temp[hist_length];
-float pressure[hist_length];
+
+
+
+//thermodynamical quantities
+class Thermo_Record {
+	private:
+		float * X;  // most recent values of thermo
+		float * X2;  // square of X
+		float SX;  // sum of values in X
+		float SX2;  // sum of values in SX
+		int idx;  // points to where we are looking in arrays
+		int h;  // length of arrays X, X2
+    
+
+	public:
+		float mean;  // SX / length(SX)
+		float sd;  // SX2 / length(SX2) - mean^2
+		float latest_value;  //last thing put in 
+
+		Thermo_Record(int n)
+		{
+			SX = SX2 = 0.0;
+			idx = 0;
+			mean = sd = 0.0;
+			latest_value = 0.0;
+			h = n;
+			X = (float*)calloc(n, sizeof(float));
+			X2 = (float*)calloc(n, sizeof(float));
+		}
+
+		~Thermo_Record()
+		{
+			SX = SX2 = mean = sd = 0.0;
+			if(X != NULL) { free(X); }
+			if(X != NULL) { free(X2); }
+		}
+
+		void update(float value)
+		{
+			SX -= X[idx];
+			X[idx] = value;
+			SX += value;
+
+			mean = SX/h;
+
+			SX2 -= X2[idx];
+			X2[idx] = value * value;
+			SX2 += X2[idx];
+
+			sd = SX2 / h - mean * mean;
+			idx = ( (idx + 1 ) >= h ) ? 0 : idx + 1;
+
+			latest_value = value;
+		}
+
+};
+
+
+float impulse_sum = 0.0;
+pressure = Thermo(hist_length);
+
+
+
+//float gas_temp[hist_length];
+//float pressure[hist_length];
+//float sum_pressure = 0.0;
+//float sum_pressure_squared = 0.0;
 
 
 
@@ -953,15 +1018,14 @@ float3 vadd(float3 a, float3 b)
 
 
 
-void compute_thermo(float t_tot, int rec, float mass, float3 v_in, float3 v_out, float3 normal)
-{
-  float impulse;
-  impulse = mass * (dot(v_out,normal) - dot(v_in,normal));
-  impulse_cumsum += impulse;
-  pressure[rec] = (impulse_cumsum / t_tot) / surface_area;
-  printf("%lf",impulse);
-}
 
+
+void compute_thermo(float t_tot, float mass, float3 v_in, float3 v_out, float3 normal)
+{
+  impulse_sum += mass * (dot(v_out,normal) - dot(v_in,normal));
+  P = (impulse_sum / t_tot) / surface_area;
+  pressure.update[P];
+}
 
 
 
@@ -1018,7 +1082,7 @@ void n_body()
 	*/
 	
 	step = 0;
-	rec = 0;
+	//rec = 0;
 	n = N;
 	while(step++ < smart_max_steps)
 	//while(step++ < MAX_STEPS)// || burn_in_period > 0)
@@ -1072,11 +1136,17 @@ void n_body()
 				  //v_in.z = v_CPU[i].z;
 				  v_in = v_CPU[i];
 				  resolve_particle_collision(i, t_CPU[i]);
-				  compute_thermo(t_tot,rec,mass_CPU[i],v_in,v_CPU[i],collision_normal);
 				  
+				  //sum_pressure -= pressure[rec];
+				  //sum_pressure_squared -= pressure[rec]*pressure[rec];
+				  compute_thermo(t_tot,mass_CPU[i],v_in,v_CPU[i],collision_normal);
+				  //sum_pressure += pressure[rec];
+				  //sum_pressure_squared += pressure[rec]*pressure[rec];
+				  //mean_pressure = sum_pressure / hist_length;
+				  //sd_pressure = sum_pressure_squared / hist_length - mean_pressure;
 				  
-				  rec++;
-				  if(rec>=hist_length) rec=0;
+				  //rec++;
+				  //if(rec>=hist_length) rec=0;
 				}
 				else
 				{
