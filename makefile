@@ -4,9 +4,10 @@
 GPP = nvcc
 COMPFLAGS = -std=c++11
 LINKFLAGS = 
+INCD = -I"/use/local/cuda/samples/common/inc"
 
 3DOBJ = cook.exe
 LDFLAGS = -lGL -lGLU -lglut
 
 $(3DOBJ) : main.cu
-	$(GPP) -o $@ $< $(COMPFLAGS) $(LDFLAGS)
+	$(GPP) -o $@ $< $(COMPFLAGS) $(INCD) $(LDFLAGS)
