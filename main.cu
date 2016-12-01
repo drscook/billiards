@@ -769,92 +769,6 @@ float3 heated_wall_reflection(float3 v_in, float3 normal, float3 tangent1, float
 	v_out = sn * normal + st1 * tangent1 + st2 * tangent2;
 	return v_out;
 }
-<<<<<<< HEAD
-void resolve_particle_collision(int i0, float time)
-{
-	float3 t, x_v1, y_v1, x_v2, y_v2, n;
-	float len, m1m2, u;
-	int wall;
-	int i, i1;
-	float ke_in, ke_out, temp_at_point, point;
-	std:: uniform_real_distribution<double> u_dist(0, 1.0);
-
-	if( how_many_w_CPU[i0] > 0) // if particle hits a wall
-	{
-		t = v_CPU[i0];
-
-		if(how_many_w_CPU[i0] > 1) // if it hits mutliple walls
-		{
-			// if it hits multiple walls, then it hits a 
-			// corner (either of 2 or 3 walls). 
-			// Solution is to find average of all 
-			// normal vectors at that corner, and 
-			// have particle rebound specularly 
-			// about that averaged normal
-			w_collisions_passive[i0] += 1.0;
-			n.x = n.y = n.z = 0.0;
-			for(i = 0; i < how_many_w_CPU[i0]; i++)
-			{
-				wall = -(1 + what_w_CPU[max_walls * i0 + i]);
-				tag_CPU[max_walls * i0 + i] = what_w_CPU[max_walls * i0 + i];
-
-				n.x += normal[wall].x;
-				n.y += normal[wall].y;
-				n.z += normal[wall].z;
-			}
-			len = sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
-			len = (len > 0) ? len : 1.0;
-			n.x /= len; n.y /= len; n.z /= len;
-
-			v_CPU[i0] = specular_reflect(t, n);
-		}
-		else // if hits single wall
-		{
-			tag_CPU[max_walls * i0] = what_w_CPU[max_walls * i0];
-			wall = -(1 + what_w_CPU[max_walls * i0]);
-
-			if( WALL_TAG[wall] == passive )
-			{
-				v_CPU[i0] = specular_reflect(t, normal[wall]);
-				w_collisions_passive[i0] += 1.0;
-			}
-			else if( WALL_TAG[wall] == heated )
-			{
-				w_collisions_heated[i0] += 1.0;
-				if( (w_collisions_heated[i0] < (diff_number + 0.5)) && (w_collisions_heated[i0] > (diff_number - 0.5)) ) all_particles_diffused++;
-
-				u = u_dist(generator);
-				// alpha is percentage of time particles are affected by wall temperature 
-				if(u > alpha[wall])
-				{
-					v_CPU[i0] = specular_reflect(t, normal[wall]);
-				}
-				else
-				{
-					point = get_intersection_point(time, i0);
-//					temp_at_point = wall_temperature(point, wall);
-					temp_at_point = WALL_TEMP[wall][0];
-
-					ke_in  = 0.5 * mass_CPU[i0] * ( v_CPU[i0].x * v_CPU[i0].x + 
-									v_CPU[i0].y * v_CPU[i0].y + 
-									v_CPU[i0].z * v_CPU[i0].z);
-
-					v_CPU[i0] = heated_wall(t, temp_at_point, mass_CPU[i0], normal[wall]);
-
-					ke_out = 0.5 * mass_CPU[i0] * ( v_CPU[i0].x * v_CPU[i0].x + 
-									v_CPU[i0].y * v_CPU[i0].y + 
-									v_CPU[i0].z * v_CPU[i0].z);
-                        
-					wall_entropy[wall] += (ke_in - ke_out) / temp_at_point;
-					wall_collisions[wall] += 1.0;
-					if(wall == 0) total_heat_flow += (ke_in - ke_out);
-					total_entropy += (ke_in - ke_out) / temp_at_point;
-				}
-			}
-		}
-=======
->>>>>>> cook
-
 
 void particle_particle_collision(int i0, int i1)
 {
@@ -1199,7 +1113,6 @@ void n_body()
 	fclose(viz_file);
 	printf("%i gas particles, %.1f steps, %.4f seconds in time\n", N, 1.0 * step, t_tot);
 }
-
 
 
 void control()
