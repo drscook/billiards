@@ -1,14 +1,19 @@
-#ifdef __APPLE__
-#include <GLUT/glut.h>
-#else
-#include <GL/glut.h>
-#endif
-
 #include <time.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <random>
+#include "/usr/local/cuda/samples/common/inc/helper_math.h"
+
+//KEY SUBTLETY: There could be cmmplex events which involve multiple particles and/or multiple walls.
+//We allow only 2 type of events
+//Type 1: 1 particle hitting 1 or more walls (no additional particles)
+//Type 2: 2 particles hitting each other (no additional particles, no walls)
+//We will take care to detect more complex collisions and avoid them by
+//delaying the particles during flight.  More specifically, if dt_step is the time increment
+//for this step, most particles positions are updated by pos += vel * dt_step.  But particles
+//involved in a forbidden complex collision are updated by pos += vel * dt_step * rand, where
+//rand is a random number slightly less than 1.
 
 //openGL vis parameters
 #define XWindowSize 2500
@@ -24,7 +29,12 @@
 #define MIN(x, y) (x < y) ? x : y
 #define MAX(x, y) (x > y) ? x : y
 
-std:: random_device generator;
+#define hist_length 1000
+#define tol_float 0.0001
+
+std :: random_device generator;
+std :: uniform_real_distribution<float> unif_dist(0.0, 1.0);
+std :: normal_distribution<float> norm_dist(0.0, 1.0);
 
 dim3 block, grid;
 
@@ -32,13 +42,14 @@ dim3 block, grid;
 int DIMENSION = 3;
 int N = 10;
 float MAX_CUBE_DIM = 2.0;
+float surface_area;
+float vol;
 float default_radius = 0.1;
 float default_mass = 2.0;
 
 //non-physical parameters
-int STOP_TIME = 1000;
+int MAX_STEPS = 1000;
 int steps_per_record = 50;
-int visualize = 1;
 int track_large_particle = 0;
 int ignore_particle_interaction;
 int all_particles_diffused = 0;
@@ -47,11 +58,14 @@ int packing_scheme = 0;
 
 //physical constants
 float BOLTZ_CONST = 1.0; //1.38064852e-23;
-int max_walls = 3;  // number of walls that a particle can hit at a time
+int max_complex = 4;  // number of walls that a particle can hit at a time
 
 //file names for IO
 char *in_fname = NULL;
 char dir_name[256] = "\0./";
+int n_events;
+int collides[2];
+int collider[2];
 
 //particle
 float3 *p_CPU, *p_GPU; // position
@@ -60,15 +74,17 @@ float *mass_CPU, *mass_GPU; // mass
 float *radius_CPU, *radius_GPU; // radius
 float *max_square_displacement = NULL; // dist from wall
 float *p_temp_CPU; // kinetic energy
-float *t_CPU, *t_GPU; // time particle will take to collide
+float *dt_CPU, *dt_GPU; // time particle will take to collide
 float default_p_temp = 1.0; // default kinetic energy
-float *tot_dist = NULL;    //mean free path 
 float *p_collisions = NULL;//mean free path
 float *w_collisions_heated = NULL;//mean free path
 float *w_collisions_passive= NULL;//mean free path
+float3 collision_normal;
 
 //walls
 float3 normal[6];
+float3 tangent1[6];
+float3 tangent2[6];
 float alpha[6];
 int WALL_TAG[6];
 float WALL_TEMP[6][2];
@@ -76,7 +92,7 @@ float max_temp = 90.0;
 float min_temp = 45.0;
 
 //visualization
-float EYE;
+//float EYE;
 
 //memory management so particle collisions happen in order
 int *tag_CPU, *tag_GPU;
@@ -85,22 +101,84 @@ int *what_p_CPU, *what_p_GPU;
 int *how_many_p_CPU, *how_many_p_GPU;
 int *how_many_w_CPU, *how_many_w_GPU;
 
-//calculation variables
-float total_entropy;
-float total_heat_flow;
-float gas_temp;
-float wall_entropy[6];
-float wall_collisions[6];
-float *since_last = NULL;
-float slice_width;
-float t_in_slice[10];
-int   n_slices = 10;
-int   n_in_slice[10];
+
+
+
+
+//thermodynamical quantities
+class Thermo_Record {
+	private:
+		float *X;  // most recent values of thermo
+		float *X2;  // square of X
+		float SX;  // sum of values in X
+		float SX2;  // sum of values in SX
+		int idx;  // points to where we are looking in arrays
+		int h;  // length of arrays X, X2
+    
+
+	public:
+		float mean;  // SX / length(SX)
+		float sd;  // SX2 / length(SX2) - mean^2
+		float latest_value;  //last thing put in 
+
+		Thermo_Record(int n)
+		{
+			SX = SX2 = 0.0;
+			idx = 0;
+			mean = sd = 0.0;
+			latest_value = 0.0;
+			h = n;
+			X = (float*)calloc(n, sizeof(float));
+			X2 = (float*)calloc(n, sizeof(float));
+		}
+
+		~Thermo_Record()
+		{
+			SX = SX2 = mean = sd = 0.0;
+			if(X != NULL) { free(X); }
+			if(X != NULL) { free(X2); }
+		}
+
+		void update(float value)
+		{
+			SX -= X[idx];
+			X[idx] = value;
+			SX += value;
+
+			mean = SX/h;
+
+			SX2 -= X2[idx];
+			X2[idx] = value * value;
+			SX2 += X2[idx];
+
+			sd = SX2 / h - mean * mean;
+			idx = ( (idx + 1 ) >= h ) ? 0 : idx + 1;
+
+			latest_value = value;
+		}
+};
+
+
+float impulse_sum = 0.0;
+int thermo_rec_length = 1000;
+Thermo_Record pressure = Thermo_Record(thermo_rec_length);
+
+void compute_thermo(float t_tot, float mass, float3 v_in, float3 v_out, float3 normal)
+{
+//	float impulse, P;
+//	impulse = mass * ( dot(v_out - v_in, normal));
+//	impulse_sum += impulse;
+//	P = (impulse_sum / t_tot) / surface_area;
+//	pressure.update(P);
+}
+
+
+
 
 // reads input file of parameters (temperature of walls, particle size, &c)
-void set_macros()
+void read_input_file()
 {
-  	FILE * fp = NULL;
+  FILE * fp = NULL;
 	const int bdim = 132;
 	char buff[bdim];
 	int i, d;
@@ -116,9 +194,8 @@ void set_macros()
 	default_mass = 2.0;
 
 	//non-physical parameters
-	STOP_TIME = 1000;
+	MAX_STEPS = 1000;
 	steps_per_record = 50;
-	visualize = false;
 	track_large_particle = false;
 	ignore_particle_interaction = false;
 
@@ -140,11 +217,6 @@ void set_macros()
 		fgets(buff,bdim,fp);
 		sscanf(buff, "%d", &d);
 		DIMENSION = d;
-
-		fgets(buff,bdim,fp);
-		fgets(buff,bdim,fp);
-		sscanf(buff, "%d", &d);
-		visualize = d;
 
 		fgets(buff, bdim, fp);
 		fgets(buff, bdim, fp);
@@ -171,7 +243,7 @@ void set_macros()
 		fgets(buff,bdim,fp);
 		fgets(buff,bdim,fp);
 		sscanf(buff, "%d", &d);
-		STOP_TIME = d;
+		MAX_STEPS = d;
 
 		fgets(buff, bdim, fp);
 		for(i = 0; i < 6; i++)
@@ -200,44 +272,19 @@ void set_macros()
 	}
 }
 
-// compute gas temperature based on kinetic energy of particles
-void compute_t()
-{
-	int i;
-	gas_temp = 0.0;
-
-	for(i = 0; i < N; i++)
-	{
-		p_temp_CPU[i] = mass_CPU[i] * (v_CPU[i].x * v_CPU[i].x + v_CPU[i].y * v_CPU[i].y + v_CPU[i].z * v_CPU[i].z)
-				/ (1.0 * DIMENSION * BOLTZ_CONST);
-		gas_temp += p_temp_CPU[i];
-	}
-	gas_temp /= (1.0 * N);
-}
-
-// evaluates temperature of wall at a point assuming T varies linearly between ends
-float wall_temperature(float x, int wall)
-{
-	return (x + MAX_CUBE_DIM) * (WALL_TEMP[wall][0] + (WALL_TEMP[wall][1] - WALL_TEMP[wall][0]) / (2.0 * MAX_CUBE_DIM));
-}
-
-float get_intersection_point(float time, int p)
-{
-	return p_CPU[p].x + v_CPU[p].x * time;
-}
 
 //initialize particles with position, velcoity, radius, etc. 
 void pack_particles()
 {
 	int i, j, k, num, particles_per_side;
-	float max_radius, hole_radius, temp;
+	float max_radius, hole_radius, temp, rad_sep = 1.0 + 1.0 / 20.0;
 	float T, tol = 1.0e-7;
 	float x_length, x_start;
 	float y_length, y_start;
 	float z_length, z_start;
 
 	//tag particles not to hit themselves
-	for(i = 0;  i < max_walls * N; i++) tag_CPU[i] = i / max_walls;
+	for(i = 0;  i < max_complex * N; i++) tag_CPU[i] = -N;//i / max_complex;
 	
 	//set initial particle parameters
 	for (i = 0; i < N; i++)
@@ -257,7 +304,7 @@ void pack_particles()
 	if(packing_scheme < 1)
 	{
 		//square lattice
-		hole_radius = max_radius * 1.1;
+		hole_radius = max_radius * rad_sep;
 		temp = pow((float)N, 1.0 / (1.0 * DIMENSION)) + .99999;
 		particles_per_side = (int)temp;
 		x_length = hole_radius * (2.0 * particles_per_side);
@@ -290,7 +337,7 @@ void pack_particles()
 	else
 	{
 		//tetrahedral lattice
-		hole_radius = max_radius * 1.1;
+		hole_radius = max_radius * rad_sep;
 		temp = pow((float)N, 1.0 / (1.0 * DIMENSION)) + .99999;
 		particles_per_side = (int)temp;
 		x_length = hole_radius * (2.0 * particles_per_side + 1.0);
@@ -331,49 +378,68 @@ void pack_particles()
 
 	for (i = 0; i < N; i++)
 	{
-		max_square_displacement[i] = (MAX_CUBE_DIM - radius_CPU[i] + tol) * (MAX_CUBE_DIM - radius_CPU[i] + tol);
+		max_square_displacement[i] = ((MAX_CUBE_DIM - radius_CPU[i]) + tol_float) * ((MAX_CUBE_DIM - radius_CPU[i]) + tol_float);
 	}
 
 	for (i = 0; i < N; i++)
 	{
 		T = sqrt(BOLTZ_CONST * p_temp_CPU[i] / mass_CPU[i]);
-		std::normal_distribution<double> normal_dist(0, T);
 
-		v_CPU[i].x = normal_dist(generator);
-		v_CPU[i].y = normal_dist(generator);
-		v_CPU[i].z = normal_dist(generator);
-		tot_dist[i] = 0.0;
+		v_CPU[i].x = norm_dist(generator)*T;
+		v_CPU[i].y = norm_dist(generator)*T;
+		v_CPU[i].z = norm_dist(generator)*T;
 		p_collisions[i] = w_collisions_heated[i] = w_collisions_passive[i] = 0.0;
 	}
 }
 
-void set_initail_conditions()
+
+void make_orthonormal_frame(float3 * n, float3 * t1, float3 * t2)
 {
-	int i, j, k, num, particles_per_side;
-	float max_radius, hole_radius, temp, T;
-	float tol = 1.0e-7;
 
-	set_macros();
+	if( ( (*n).x * (*n).x > 0) || ((*n).y * (*n).y > 0) )
+	{
+		(*t1).x = (*n).y;
+		(*t1).y =-(*n).x;
+		(*t1).z = 0;
+	}
+	else if((*n).z * (*n).z > 0)
+	{
+		(*t1).x =-(*n).z;
+		(*t1).y = 0;
+		(*t1).z = (*n).x;
+	}
+	else
+	{
+		printf("Failed to initialize normal and tangent vectors");
+		exit(1);
+	}
+	(*t2) = cross((*n), (*t1));
+	(*n) = normalize(*n);
+	(*t1) = normalize(*t1);
+	(*t2) = normalize(*t2);
+}		
 
-	EYE = 2.0 * MAX_CUBE_DIM; // set visualization vantage point
+
+void set_initial_conditions()
+{
+	int i;
 
 	//CPU MEMORY ALLOCATION
-	p_CPU          = (float3*)malloc(             N * sizeof(float3) );
-	v_CPU          = (float3*)malloc(             N * sizeof(float3) );
-	radius_CPU     = (float* )malloc(             N * sizeof(float ) );
+	p_CPU          = (float3*)malloc(            N * sizeof(float3) );
+	v_CPU          = (float3*)malloc(            N * sizeof(float3) );
+	radius_CPU     = (float* )malloc(            N * sizeof(float ) );
 	max_square_displacement = (float*)malloc(N * sizeof(float));
-	mass_CPU       = (float* )malloc(             N * sizeof(float ) );
-	t_CPU          = (float* )malloc(             N * sizeof(float ) );
-	p_temp_CPU     = (float* )malloc(             N * sizeof(float ) );
-	tag_CPU        = (int*   )malloc( max_walls * N * sizeof(int   ) );
-	how_many_p_CPU = (int*   )malloc(             N * sizeof(int   ) );
-	how_many_w_CPU = (int*   )malloc(             N * sizeof(int   ) );
-	what_p_CPU     = (int*   )malloc(             N * sizeof(int   ) );
-	what_w_CPU     = (int*   )malloc( max_walls * N * sizeof(int   ) );
-	tot_dist       = (float* )malloc(             N * sizeof(float ) );
-	p_collisions   = (float* )malloc(             N * sizeof(float ) );
-	w_collisions_heated = (float* )malloc(        N * sizeof(float ) );
-	w_collisions_passive= (float* )malloc(        N * sizeof(float ) );
+	mass_CPU       = (float* )malloc(            N * sizeof(float ) );
+	dt_CPU         = (float* )malloc(            N * sizeof(float ) );
+	p_temp_CPU     = (float* )malloc(            N * sizeof(float ) );
+	tag_CPU        = (int*   )malloc(max_complex*N * sizeof(int   ) );
+	how_many_p_CPU = (int*   )malloc(            N * sizeof(int   ) );
+	how_many_w_CPU = (int*   )malloc(            N * sizeof(int   ) );
+	what_p_CPU     = (int*   )malloc(	     N * sizeof(int   ) );
+	what_w_CPU     = (int*   )malloc(max_complex*N * sizeof(int   ) );
+	p_collisions   = (float* )malloc(            N * sizeof(float ) );
+	w_collisions_heated = (float* )malloc(       N * sizeof(float ) );
+	w_collisions_passive= (float* )malloc(       N * sizeof(float ) );
 
 	// GPU MEMORY ALLOCATION
 	block.x = 512;
@@ -389,16 +455,17 @@ void set_initail_conditions()
 	cudaMalloc( (void**)&radius_GPU,  N *sizeof(float ) );
 	cudaMalloc( (void**)&mass_GPU,    N *sizeof(float ) );
 
-	cudaMalloc( (void**)&tag_GPU,    max_walls * N *sizeof(int  ) );
-	cudaMalloc( (void**)&t_GPU,                  N *sizeof(float) );
-	cudaMalloc( (void**)&how_many_p_GPU,         N *sizeof(int  ) );
-	cudaMalloc( (void**)&how_many_w_GPU,         N *sizeof(int  ) );
-	cudaMalloc( (void**)&what_p_GPU,             N *sizeof(int  ) );
-	cudaMalloc( (void**)&what_w_GPU, max_walls * N *sizeof(int  ) );
-
+	cudaMalloc( (void**)&tag_GPU,	  max_complex * N *sizeof(int  ) );
+	cudaMalloc( (void**)&dt_GPU,			N *sizeof(float) );
+	cudaMalloc( (void**)&how_many_p_GPU,		N *sizeof(int  ) );
+	cudaMalloc( (void**)&how_many_w_GPU,		N *sizeof(int  ) );
+	cudaMalloc( (void**)&what_p_GPU,		N *sizeof(int  ) );
+	cudaMalloc( (void**)&what_w_GPU,  max_complex * N *sizeof(int  ) );
 
 
 	// set up wall parameters for box
+	surface_area = 6*(2*MAX_CUBE_DIM)*(2*MAX_CUBE_DIM);
+	vol = (2*MAX_CUBE_DIM)*(2*MAX_CUBE_DIM)*(2*MAX_CUBE_DIM);
 	max_temp = min_temp = 0.0; // average temperature of walls
 	for(i = 0; i < 6; i++)
 	{
@@ -408,7 +475,7 @@ void set_initail_conditions()
 	default_p_temp = (max_temp + min_temp) / 2.0;
 
 	//set entropy and collisions to 0
-	for (i = 0; i < 6; i++){ wall_entropy[i] = wall_collisions[i] = 0; alpha[i] = 1.0;}
+	for (i = 0; i < 6; i++){ alpha[i] = 1.0;}
 
 	//normal vectors to walls 
 	normal[0].x = 1.0; normal[0].y = 0.0; normal[0].z = 0.0;
@@ -418,99 +485,39 @@ void set_initail_conditions()
 	normal[3].x = 0.0; normal[3].y =-1.0; normal[3].z = 0.0;
 	normal[5].x = 0.0; normal[5].y = 0.0; normal[5].z =-1.0;
 
+	for(i = 0; i < 6; i++)
+	{
+		make_orthonormal_frame(&normal[i], &tangent1[i], &tangent2[i]);
+	}
+
 	// set up particle parameters
 	pack_particles();
-	compute_t();
+	//compute_t();
 
 	// copy CPU initialization to GPU
 	cudaMemcpy( p_GPU,      p_CPU,                  N *sizeof(float3), cudaMemcpyHostToDevice );
 	cudaMemcpy( v_GPU,      v_CPU,                  N *sizeof(float3), cudaMemcpyHostToDevice );
 	cudaMemcpy( mass_GPU,   mass_CPU,               N *sizeof(float ), cudaMemcpyHostToDevice );
 	cudaMemcpy( radius_GPU, radius_CPU,             N *sizeof(float ), cudaMemcpyHostToDevice );
-	cudaMemcpy( tag_GPU,    tag_CPU,    max_walls * N *sizeof(int   ), cudaMemcpyHostToDevice );
+	cudaMemcpy( tag_GPU,    tag_CPU,  max_complex * N *sizeof(int   ), cudaMemcpyHostToDevice );
 
-	slice_width = 2.0 * MAX_CUBE_DIM / (1.0 * n_slices);
 }
 
-void draw_picture()
+
+
+// evaluates temperature of wall at a point assuming T varies linearly between ends
+float wall_temperature(float x, int wall)
 {
-	int i;
-	float red, green, blue, hi, mid;
-	
-	glClear(GL_COLOR_BUFFER_BIT);
-	glClear(GL_DEPTH_BUFFER_BIT);
-	
-	glColor3d(1.0,1.0,0.5);
-	for(i=0; i<N; i++)
-	{
-		hi = MIN(p_temp_CPU[i] / max_temp, 1.7);
-		mid = 0.75 - hi;
-		red = hi * hi;
-		green = 1.0 - mid * mid * mid * mid;
-		blue = 1.5 - red;
-
-		glColor3f(red, green, blue);
-		glPushMatrix();
-		glTranslatef(p_CPU[i].x, p_CPU[i].y, p_CPU[i].z);
-		glutSolidSphere(radius_CPU[i],20,20);
-		glPopMatrix();
-	}
-
-	if(DIMENSION > 2)//if we're in 3D
-	{
-		glBegin(GL_QUADS);
-		glColor3f(0.8, 0.8, 0.8);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
-
-		glColor3f(1.0, 1.0, 1.0);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM,  MAX_CUBE_DIM);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM,  MAX_CUBE_DIM);
-
-		glColor3f(1.0, 1.0, 1.0);
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM,  MAX_CUBE_DIM);
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM,  MAX_CUBE_DIM);
-
-		glColor3f(0.0, 1.0, 1.0);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM,  MAX_CUBE_DIM);
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM,  MAX_CUBE_DIM);
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
-
-		glColor3f(1.0, 0.15, 0.0);
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM,  MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM,  MAX_CUBE_DIM);
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, -MAX_CUBE_DIM);
-		glEnd();
-	}
-	else // if we're in 2D
-	{
-		glBegin(GL_LINES);
-		glColor3f(0.0, 1.0, 1.0);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, 0.0);
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, 0.0);
-
-		glVertex3f( MAX_CUBE_DIM, -MAX_CUBE_DIM, 0.0);
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, 0.0);
-
-		glVertex3f( MAX_CUBE_DIM,  MAX_CUBE_DIM, 0.0);
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, 0.0);
-
-		glVertex3f(-MAX_CUBE_DIM,  MAX_CUBE_DIM, 0.0);
-		glVertex3f(-MAX_CUBE_DIM, -MAX_CUBE_DIM, 0.0);
-
-		glEnd();
-	}
-
-	glutSwapBuffers();
+	return (x + MAX_CUBE_DIM) * (WALL_TEMP[wall][0] + (WALL_TEMP[wall][1] - WALL_TEMP[wall][0]) / (2.0 * MAX_CUBE_DIM));
 }
+
+
+
+float get_intersection_point(float time, int p)
+{
+	return p_CPU[p].x + v_CPU[p].x * time;
+}
+
 
 __device__ int particle_wall_collision(float3 * p, float3 * v, float * radius, float max_cube_dim, int i0, int i1, float * t)
 {
@@ -552,6 +559,8 @@ __device__ int particle_wall_collision(float3 * p, float3 * v, float * radius, f
 
 	return collides;
 }
+
+
 
 __device__ int particle_particle_collision(float3 * p, float3 * v, float * radius, int i0, int i1, float max_cube_dim, float * t)
 {
@@ -607,19 +616,21 @@ __device__ int particle_particle_collision(float3 * p, float3 * v, float * radiu
 			}
 		}
 	}
-
 	return collides;
 }
 
+
+
 __global__ void find(float3 * p, float3 * v, float * radius, float * mass,  // particle data--position, velocity, radius 
 			int * tag, int * how_many_p, int * how_many_w, int * what_p_hit, int * what_w_hit, // memory management--what each particle hits and has hit
-			int n, int max_walls, float max_cube_dim, int ignore_particle_interaction, float * min_dt) // macros--number of particles, shape of geometry, &c.
+			int n, int max_complex, float max_cube_dim, int ignore_particle_interaction, float * min_dt) // macros--number of particles, shape of geometry, &c.
 {
-	float t, global_min_dt = 0.0;
+	float dt, current_min_dt = 0.0;
+	int ddt;
 	int j, k, ok, collides, first_collision, this_particle;
 
 	first_collision = 1;
-	global_min_dt = -1.0;
+	current_min_dt = 20000000;
 
 	this_particle = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -637,134 +648,128 @@ __global__ void find(float3 * p, float3 * v, float * radius, float * mass,  // p
 		else
 		{
 			// check current particle against all particles for collision
-			for(j = 0; j < n; j++)
+			for(j = 0; j < n; j++)			
 			{
-				if( (this_particle != j) && ( (tag[max_walls * this_particle] != j) || (tag[max_walls * j] != this_particle) ) )
+				if(this_particle == j)//skip self-collision time
 				{
-				  	collides = particle_particle_collision(p, v, radius, this_particle, j, max_cube_dim, &t);
-					if( (collides > 0) && ( (t < global_min_dt) || (first_collision > 0) ) )
+					break;
+				}
+
+				ok = 1;
+				for(k = 0; k < max_complex; k++)//skip if last event was collision with particle j
+				{
+					if( (tag[max_complex * this_particle + k] == j) || (tag[max_complex * j + k] == this_particle) )
 					{
-					  	first_collision = 0;
-						what_p_hit[this_particle] = j;
-						how_many_p[this_particle] = 1;
-						global_min_dt = t;
+						ok = 0;
 					}
-					else if( (collides > 0) && (t <= global_min_dt) )
+				}
+				if(ok > 0)
+				{
+				  	collides = particle_particle_collision(p, v, radius, this_particle, j, max_cube_dim, &dt);
+					if(collides > 0)
 					{
-						global_min_dt = t;
-						how_many_p[this_particle]++;
+						if(first_collision > 0)
+						{	
+							ddt = -1;
+						}
+						else
+						{
+							ddt = ceil((dt - current_min_dt) / tol_float);
+						}
+						if(ddt <=1)//within 1 tol_float of current_min_dt.  So it counts
+						{
+							if(ddt <= 0)//less than current_min_dt.  So becomes current_min_dt, but may not necessarily clear prior events
+							{
+								current_min_dt = dt;
+								if(ddt <= -1)//more than 1 float_tol less than current_min_dt.  Thus, clears prior events
+								{
+									how_many_p[this_particle] = 0;
+								}
+							}
+						  	first_collision = 0;
+							what_p_hit[this_particle] = j;
+							how_many_p[this_particle]++;
+						}
 					}
 				}
 			}
 		}
 
 		// check current particle against walls for collision
+		how_many_w[this_particle] = 0;
 		for(j = 0; j < 6; j++)
 		{
 			ok = 1;
-			for(k = 0; k < max_walls; k++) 
+			for(k = 0; k < max_complex; k++) 
 			{
-				if(tag[max_walls * this_particle + k] == -(j + 1) )
+				if(tag[max_complex * this_particle + k] == -(j + 1) )
 				{
 					ok = 0;
 				}
 			}
-
-			if(ok)
+			if(ok > 0)
 			{
-				collides = particle_wall_collision(p, v, radius, max_cube_dim, this_particle, j, &t);
-
-				if( (collides > 0) && ( (t < global_min_dt) || (first_collision > 0) ) )
+				collides = particle_wall_collision(p, v, radius, max_cube_dim, this_particle, j, &dt);
+				if( collides > 0 )
 				{
-					first_collision = 0;
-					global_min_dt = t;
-
-					how_many_p[this_particle] = 0; // since we're re-setting the min time, it doesn't hit any other particles
-					what_p_hit[this_particle] = n; // reset the number of particles this has hit to be 0 for new min timestep
-
-					how_many_w[this_particle] = 1;
-					what_w_hit[max_walls * this_particle] = -(j + 1);
-				}
-				else if( (collides > 0) && (t <= global_min_dt) )
-				{
-					what_w_hit[max_walls * this_particle + how_many_w[this_particle]] = -(j + 1);
-					how_many_w[this_particle]++;
-					global_min_dt = t;
+					if(first_collision > 0)
+					{
+						ddt = -1;
+					}
+					else
+					{
+						ddt = ceil((dt - current_min_dt) / tol_float);
+					}
+					if(ddt <= 1)
+					{
+						if(ddt <= 0)
+						{
+							current_min_dt = dt;
+							if(ddt <= -1)
+							{
+								how_many_p[this_particle] = 0;
+								how_many_w[this_particle] = 0;
+							}	
+						}
+						first_collision = 0;
+						what_w_hit[max_complex * this_particle + how_many_w[this_particle]] = -(j + 1);
+						how_many_w[this_particle]++;
+					}
 				}
 			}
 		}
-		min_dt[this_particle] = (first_collision < 1) ? global_min_dt : -10;
+		min_dt[this_particle] = current_min_dt;
 	}
 }
 
 
-float3 specular_reflect(float3 v_in, float3 n)
+float3 specular_reflect(float3 v_in, float3 normal)
 {
-	float dotproduct;
-	float3 v_out;
-
-  	dotproduct = - (v_in.x * n.x + v_in.y * n.y + v_in.z * n.z);
-	v_out.x = v_in.x + 2.0 * dotproduct * n.x;
-	v_out.y = v_in.y + 2.0 * dotproduct * n.y;
-	v_out.z = v_in.z + 2.0 * dotproduct * n.z;
-
-	return (v_out);
+	float3 v_out = v_in - (2.0 * dot(normal, v_in) * normal);
+	return(v_out);
 }
-
 
 float chi_sq(float u, float sigma)
 {
 	return sigma * sqrt(fabs(2.0 * log(1.0 - u)));
 }
 
-float3 heated_wall(float3 v_in, float T, float m, float3 n)
+
+float3 heated_wall_reflection(float3 v_in, float3 normal, float3 tangent1, float3 tangent2, float T, float m)
 {
-	float3 t1, t2, v_out;
-	float u, v, w, len, sigma = sqrt(BOLTZ_CONST * T / m);
-	int ok = 0;
+	float3 v_out;
+	float u, sn, st1, st2;
+	float sigma = sqrt(BOLTZ_CONST * T / m);
 
-	std:: normal_distribution<double> norm_dist(0, sigma);
-	std:: uniform_real_distribution<double> uniform_dist(0, 1.0);
-	u = uniform_dist(generator);
-	u = chi_sq(u, sigma);
-	v = norm_dist(generator);
-	w = norm_dist(generator);
+	u = unif_dist(generator);
+	sn = chi_sq(u, sigma);
+	st1 = norm_dist(generator)*sigma;
+	st2 = norm_dist(generator)*sigma;
 
-	if( (n.x * n.x > 0.0) || (n.y * n.y > 0.0) )
-	{
-		t1.x = -n.y;
-		t1.y =  n.x;
-		t1.z =  0.0;
-
-		ok = 1;
-	}
-	else if( n.z * n.z > 0.0 )
-	{
-		t1.x = -n.z;
-		t1.y =  0.0;
-		t1.z =  n.x;
-		ok = 1;
-	}
-	if(ok)
-	{
-		len = t1.x * t1.x + t1.y * t1.y + t1.z * t1.z;
-		len = (len > 0) ? sqrt(len) : 1.0;
-		t1.x /= len; t1.y /= len; t1.z /= len;
-
-		t2.x = n.y * t1.z - n.z * t1.y;
-		t2.y = n.z * t1.x - n.x * t1.z;
-		t2.z = n.x * t1.y - n.y * t1.x;
-
-		len = t2.x * t2.x + t2.y * t2.y + t2.z * t2.z;
-		len = (len > 0) ? sqrt(len) : 1.0;
-		t2.x /= len; t2.y /= len; t2.z /= len;
-
-		v_out.x = (u * n.x + v * t1.x + w * t2.x);
-		v_out.y = (u * n.y + v * t1.y + w * t2.y);
-		if(DIMENSION > 2) v_out.z = (u * n.z + v * t1.z + w * t2.z);
-	}
+	v_out = sn * normal + st1 * tangent1 + st2 * tangent2;
 	return v_out;
 }
+<<<<<<< HEAD
 void resolve_particle_collision(int i0, float time)
 {
 	float3 t, x_v1, y_v1, x_v2, y_v2, n;
@@ -847,115 +852,58 @@ void resolve_particle_collision(int i0, float time)
 				}
 			}
 		}
-
-		for(i = how_many_w_CPU[i0]; i < max_walls; i++) tag_CPU[max_walls * i0 + i] = N;
-	}
-	else if(how_many_p_CPU[i0] > 0) // if it hits a particle
-	{
-		i1 = what_p_CPU[i0];
-		p_collisions[i0] += 1.0;
-		p_collisions[i1] += 1.0;
-		if(i1 < N)
-		{
-			for(i = 0; i < max_walls; i++) tag_CPU[max_walls * i1 + i] = tag_CPU[max_walls * i0 + i] = N;
-
-			tag_CPU[max_walls * i0] = i1;
-			tag_CPU[max_walls * i1] = i0;
-
-			how_many_w_CPU[i0] = how_many_w_CPU[i1] = how_many_p_CPU[i1] = how_many_p_CPU[i0] = 0;
-
-			m1m2 = mass_CPU[i0] + mass_CPU[i1];
-			m1m2 = (m1m2 * m1m2 > 0) ? m1m2 : 1.0;
-
-			// t is the vector from center of i0 to center of i1
-			t.x = p_CPU[i0].x - p_CPU[i1].x;
-			t.y = p_CPU[i0].y - p_CPU[i1].y;
-			t.z = p_CPU[i0].z - p_CPU[i1].z;
-
-			// normalize t
-			len = sqrt(t.x * t.x + t.y * t.y + t.z * t.z);
-			len = (len > 0) ? len : 1.0;
-			t.x /= len;
-			t.y /= len;
-			t.z /= len;
-
-			//--------------------Particle 1-----------------------//
-			// get vector component of v_CPU[i0] parallel to t (x_v1)
-			len = t.x * v_CPU[i0].x + t.y * v_CPU[i0].y + t.z * v_CPU[i0].z;
-			x_v1.x = len * t.x;
-			x_v1.y = len * t.y;
-			x_v1.z = len * t.z;
-			// get vector component of v_CPU[i0] perpendicular to t (y_v1)
-			y_v1.x = v_CPU[i0].x - x_v1.x;
-			y_v1.y = v_CPU[i0].y - x_v1.y;
-			y_v1.z = v_CPU[i0].z - x_v1.z;
-			//-----------------------------------------------------//
+=======
+>>>>>>> cook
 
 
-			//--------------------Particle 2-----------------------//
-			// get vector component of v_CPU[i1] parallel to t (x_v2)
-			t.x = -t.x; t.y = -t.y; t.z = -t.z;
-			len = t.x * v_CPU[i1].x + t.y * v_CPU[i1].y + t.z * v_CPU[i1].z;
-			x_v2.x = len * t.x;
-			x_v2.y = len * t.y;
-			x_v2.z = len * t.z;
-			// get vector component of v_CPU[i1] perpendicular to t (y_v2)
-			y_v2.x = v_CPU[i1].x - x_v2.x;
-			y_v2.y = v_CPU[i1].y - x_v2.y;
-			y_v2.z = v_CPU[i1].z - x_v2.z;
-			//-----------------------------------------------------//
-
-			// update vidx0 and vidx1 to hold new velocities
-			v_CPU[i0].x = (x_v1.x * (mass_CPU[i0] - mass_CPU[i1]) + x_v2.x * 2.0 * mass_CPU[i1]) / m1m2 + y_v1.x;
-			v_CPU[i0].y = (x_v1.y * (mass_CPU[i0] - mass_CPU[i1]) + x_v2.y * 2.0 * mass_CPU[i1]) / m1m2 + y_v1.y;
-			v_CPU[i0].z = (x_v1.z * (mass_CPU[i0] - mass_CPU[i1]) + x_v2.z * 2.0 * mass_CPU[i1]) / m1m2 + y_v1.z;
-
-			v_CPU[i1].x = (x_v2.x * (mass_CPU[i1] - mass_CPU[i0]) + x_v1.x * 2.0 * mass_CPU[i0]) / m1m2 + y_v2.x;
-			v_CPU[i1].y = (x_v2.y * (mass_CPU[i1] - mass_CPU[i0]) + x_v1.y * 2.0 * mass_CPU[i0]) / m1m2 + y_v2.y;
-			v_CPU[i1].z = (x_v2.z * (mass_CPU[i1] - mass_CPU[i0]) + x_v1.z * 2.0 * mass_CPU[i0]) / m1m2 + y_v2.z;
-		}
-	}
-}
-
-void smooth_vis(float time)
+void particle_particle_collision(int i0, int i1)
 {
-	//float3 new_pos[N];
-	float3 * new_pos = (float3*)malloc(N * sizeof(float3));
-	float dt;
-	int i, j, num;
+	float3 t, x_v1, y_v1, x_v2, y_v2;
+	float len, m1m2;
+	p_collisions[i0] += 1.0;
+	p_collisions[i1] += 1.0;
+	n_events = 2;
+	collides[0] = i0;
+	collides[1] = i1;
+	collider[0] = i1;
+	collider[1] = i0;
 
-	dt = DT;
-	num = (int)((time / dt) + 0.5);
+	for(int i = 0; i < max_complex; i++) tag_CPU[max_complex * i1 + i] = tag_CPU[max_complex * i0 + i] = N;
 
-	compute_t();
+	tag_CPU[max_complex * i0] = i1;
+	tag_CPU[max_complex * i1] = i0;
 
-	for(i = 0; i < N; i++)
-	{
-		new_pos[i].x = p_CPU[i].x;
-		new_pos[i].y = p_CPU[i].y;
-		new_pos[i].z = p_CPU[i].z;
-	}
+	how_many_w_CPU[i0] = how_many_w_CPU[i1] = how_many_p_CPU[i1] = how_many_p_CPU[i0] = 0;
 
-	dt = time / (1.0 * (num - 1.0));
-	if((num - 1) < 1){dt = time;}
+	m1m2 = mass_CPU[i0] + mass_CPU[i1];
+	m1m2 = (m1m2 * m1m2 > 0) ? m1m2 : 1.0;
 
-	for(i = 0; i < num; i++)
-	{
-		for(j = 0; j < N; j++)
-		{
-			p_CPU[j].x = new_pos[j].x + (v_CPU[j].x * dt * i);
-			p_CPU[j].y = new_pos[j].y + (v_CPU[j].y * dt * i);
-			p_CPU[j].z = new_pos[j].z + (v_CPU[j].z * dt * i);
-		}
-		draw_picture();
-	}
+	// t is the vector from center of i0 to center of i1
+	//t = normalize(p_CPU[i0] - p_CPU[i1]);
+	t = normalize(p_CPU[i0] - p_CPU[i1]);
 
-	for(i = 0; i < N; i++)
-	{
-		p_CPU[i].x = new_pos[i].x;
-		p_CPU[i].y = new_pos[i].y;
-		p_CPU[i].z = new_pos[i].z;
-	}
+	//--------------------Particle 1-----------------------//
+	// get vector component of v_CPU[i0] parallel to t (x_v1)
+	len = dot(t, v_CPU[i0]);
+	x_v1 = len * t;
+	// get vector component of v_CPU[i0] perpendicular to t (y_v1)
+	y_v1 = v_CPU[i0] - x_v1;
+	//-----------------------------------------------------//
+
+
+	//--------------------Particle 2-----------------------//
+	// get vector component of v_CPU[i1] parallel to t (x_v2)
+	t = -1 * t;
+	len = dot(t, v_CPU[i1]);
+	x_v2 = len * t;
+	// get vector component of v_CPU[i1] perpendicular to t (y_v2)
+	y_v2 = v_CPU[i1] - x_v2;
+	//-----------------------------------------------------//
+
+	// update vidx0 and vidx1 to hold new velocities
+	v_CPU[i0] = (x_v1 * (mass_CPU[i0] - mass_CPU[i1]) + x_v2 * 2 * mass_CPU[i1]) / m1m2 + y_v1;
+	v_CPU[i1] = (x_v2 * (mass_CPU[i1] - mass_CPU[i0]) + x_v1 * 2 * mass_CPU[i0]) / m1m2 + y_v2;
+
 }
 
 //float find_min_dt_and_update(float * times, int * idx, int * i0, int * i1)
@@ -1006,215 +954,219 @@ void errorCheck(int num, const char * message)
 	}
 }
 
-void check_complex_collisions(float * t, float * particle_t)
-{
-	int i, type_1, type_2;
-
-	type_1 = N; 
-	type_2 = N;
-
-	for(i = 0; i < N; i++)
-	{
-		if( (how_many_p_CPU[i] > 0) && (how_many_w_CPU[i] > 0) )
-		{
-			type_1 = i;
-		}
-		else if( how_many_p_CPU[i] > 1)
-		{
-			type_2 = i;
-		}
-	}
-	type_2 = (type_1 < N) ? N : type_2;
-
-	if(type_1 < N) how_many_p_CPU[type_1] = 0;
-
-	if( (type_1 < N) || (type_2 < N) )
-	{
-		for(i = 0; i < N; i++)
-		{
-			if( (i != type_1) && (i != type_2) )
-			{
-				how_many_p_CPU[i] = how_many_w_CPU[i] = 0;
-			}
-		}
-	}
-	if( (type_1 < N) || (type_2 < N) ) (*t) = 0.95 * (*t);
-
-	for(i = 0; i < N; i++)
-	{
-		if( ( i != type_1 ) && (i != type_2 ) )
-		{
-			particle_t[i] = (*t);
-		}
-	}
-}
-
-void add_to_slices()
-{
-	int i, j, x;
-	for(i = 0; i < n_slices; i++) n_in_slice[i] = 0;
-	for(i = 0; i < n_slices; i++) t_in_slice[i] = 0.0;
-
-	for(i = 0; i < N; i++)
-	{
-		x = p_CPU[i].x;
-		for(j = 0; j < n_slices; j++)
-		{
-			if(((-MAX_CUBE_DIM + j * slice_width) <= x) && (x <= (-MAX_CUBE_DIM + (j + 1) * slice_width)))
-			{
-				t_in_slice[j] += p_temp_CPU[i];
-				n_in_slice[j]++;
-			}
-		}
-	}
-}
-
 void n_body()
 {
-	float fixed_dt = 0.0, time_elapsed, t, tt = 0.0;
-	FILE * param_file, * pos_file, * temp_file, * slice_file, * ent_file, * mfp_file;
+	float t_tot = 0.0;
+	float dt_step = 0.0;
+	float dt_cutoff = 0.0;
+	float u, direction;
+	int complex_colliders[2];
+	int wall_collision = 0;
+	FILE * viz_file;
+	FILE * thermo_file;
 	char dir[256];
-	int burn_in_period = 1, i, time, n;
+	//int burn_in_period = 0
+	int i, j, step, rec, p, w;
+	int smart_max_steps = MAX_STEPS;
+	int smart_stop_found = 0;
+	float3 v_in, v_out;
+	
+	set_initial_conditions();
 
-	/*/		OUTPUT FILE STUFF		 /*/
-	param_file = fopen(strcat(strcpy(dir, dir_name), "parameters.txt"), "w");
-	fprintf(param_file, "dimension num_gas box_half_length radius temp1 temp2 temp3 temp4 temp5 temp6\n");
-	fprintf(param_file, "%d %d %lf %lf %lf %lf %lf %lf %lf %lf\n", 
-			DIMENSION, N, MAX_CUBE_DIM, radius_CPU[0], WALL_TEMP[0][0], 
-			WALL_TEMP[1][0], WALL_TEMP[2][0], WALL_TEMP[3][0], WALL_TEMP[4][0], WALL_TEMP[5][0]);
-	fclose(param_file);
+	
+	//WRITE INITIAL CONDITION TO FILE
+	viz_file = fopen(strcat(strcpy(dir, dir_name), "viz.csv"), "w");
+	fprintf(viz_file, "#box dimension\n box, %lf\n", MAX_CUBE_DIM);
+	fprintf(viz_file, "#particle radii\n");
+	for(i = 0; i < N; i++)
+	{
+		fprintf(viz_file, "r, %d, %lf, %lf\n", i, radius_CPU[i], mass_CPU[i]);
+	}
+	for(i = 0; i < N; i++)
+	{
+		fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+					i, 0, t_tot, 
+					p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
+					0.0, 0.0, 0.0,
+					v_CPU[i].x, v_CPU[i].y, v_CPU[i].z,
+					collision_normal.x, collision_normal.y, collision_normal.z
+			);
+	}
 
-	pos_file = fopen(strcat(strcpy(dir, dir_name), "positions.txt"), "w");
-	mfp_file = fopen(strcat(strcpy(dir, dir_name), "mfp.txt"), "w");
-	temp_file = fopen(strcat(strcpy(dir, dir_name), "temperatures.txt"), "w");
-	slice_file = fopen(strcat(strcpy(dir, dir_name), "slices.txt"), "w");
-	ent_file = fopen(strcat(strcpy(dir, dir_name), "entropy.txt"), "w");
-
-	total_heat_flow = 0.0;
-	total_entropy = 0.0;
-	time = 0;
-	n = N;
-	while(time < STOP_TIME || burn_in_period > 0)
+	step = 0;
+	smart_max_steps = MAX_STEPS;
+	while(step++ <= smart_max_steps)
 	{
 	  	// on GPU - find smallest time step s.t. any particle(s) collide either 
 	  	// with each other or a wall and update all particles to that time step
-
-		find<<<grid, block>>>(p_GPU, v_GPU, radius_GPU, mass_GPU, 
-					tag_GPU, how_many_p_GPU, how_many_w_GPU, what_p_GPU, what_w_GPU, 
-					n, max_walls, MAX_CUBE_DIM, ignore_particle_interaction, t_GPU);
-		errorCheck(time, "find");
+		find<<<grid, block>>>(p_GPU, v_GPU, radius_GPU, mass_GPU, tag_GPU, how_many_p_GPU, how_many_w_GPU, what_p_GPU, what_w_GPU, int(N), max_complex, MAX_CUBE_DIM, ignore_particle_interaction, dt_GPU);
+		errorCheck(step, "find");
 
 		//copy minimum time step and index of corresponding colliding element onto CPU 
-		cudaMemcpy( how_many_p_CPU,   how_many_p_GPU,             N * sizeof(int  ), cudaMemcpyDeviceToHost);
-		cudaMemcpy( how_many_w_CPU,   how_many_w_GPU,             N * sizeof(int  ), cudaMemcpyDeviceToHost);
-		cudaMemcpy(     what_p_CPU,       what_p_GPU,             N * sizeof(int  ), cudaMemcpyDeviceToHost);
-		cudaMemcpy(     what_w_CPU,       what_w_GPU, max_walls * N * sizeof(int  ), cudaMemcpyDeviceToHost);
-		cudaMemcpy(          t_CPU,            t_GPU,             N * sizeof(float), cudaMemcpyDeviceToHost);
+		cudaMemcpy( how_many_p_CPU, how_many_p_GPU,             N * sizeof(int  ), cudaMemcpyDeviceToHost);
+		cudaMemcpy( how_many_w_CPU, how_many_w_GPU,             N * sizeof(int  ), cudaMemcpyDeviceToHost);
+		cudaMemcpy(     what_p_CPU,     what_p_GPU,		N * sizeof(int  ), cudaMemcpyDeviceToHost);
+		cudaMemcpy(     what_w_CPU,     what_w_GPU,max_complex* N * sizeof(int  ), cudaMemcpyDeviceToHost);
+		cudaMemcpy(         dt_CPU,         dt_GPU,             N * sizeof(float), cudaMemcpyDeviceToHost);
 
-		find_min_dt(t_CPU, &t);
+		//find global min dt
+		dt_step = dt_CPU[0];
+		for (i = 1; i < N; i++)
+		{
+			if(dt_CPU[i] < dt_step)
+			{
+				dt_step = dt_CPU[i];
+			}	
+		}
+		t_tot += dt_step;
 
 		// if no collisions were detected, we are done. 
-		if(t < 0.0)
+		if(dt_step < 0.0)
 		{
-			printf("\nEND: NO MORE COLLISIONS\n");
-			break;
+			printf("\nEarly exit : dt_step = %f < 0 at step %i\n", dt_step, step);
+			exit(1);
 		}
 
-		check_complex_collisions(&t, t_CPU);
-
-		//*/ Check if particles are dispersed sufficiently 
-		if(burn_in_period > 0)
-		{
-			time++;
-			fixed_dt += t;
-
-			if( all_particles_diffused > (N - 1) )
+		//check and handle complex collisions
+		dt_cutoff = dt_step + tol_float;
+		for(i = 0; i < N; i++)
+		{			
+			if(dt_CPU[i] > dt_step) //not involved in this event
 			{
-				fixed_dt *= (1.0 * steps_per_record) / (1.0 * time);
-				time_elapsed = tt = 0.0;
-				burn_in_period = time = 0;
-				total_entropy = total_heat_flow = 0.0;
-				for(i = 0; i < N; i++) p_collisions[i] = w_collisions_heated[i] = w_collisions_passive[i] = 0.0;
-			}
-		}
-		else
-		{
-			fprintf(ent_file, "%.5e, %.5e, %.5e \n", tt, total_entropy, total_heat_flow);
-
-			if( (time_elapsed < fixed_dt) && ( (time_elapsed + t) >= fixed_dt) )
-			{
-				time++;
-				for(i = 0; i < N; i++)
-				{
-					p_CPU[i].x += (fixed_dt - time_elapsed) * v_CPU[i].x;
-					p_CPU[i].y += (fixed_dt - time_elapsed) * v_CPU[i].y;
-					p_CPU[i].z += (fixed_dt - time_elapsed) * v_CPU[i].z;
-				}
-
-				fprintf(pos_file, "%d %lf ", time, tt);
-				for(i = 0; i < N; i++)
-				{
-					fprintf(pos_file, "%lf %lf %lf ", p_CPU[i].x, p_CPU[i].y, p_CPU[i].z);
-				}
-				fprintf(pos_file, "\n");
-
-				compute_t();
-				fprintf(temp_file, "%d %lf ", time, tt);
-				for(i = 0; i < N; i++)
-				{
-					fprintf(temp_file, "%lf ", p_temp_CPU[i]);
-				}
-				fprintf(temp_file, "\n");
-
-				add_to_slices();
-				fprintf(slice_file, "%d ", time);
-				for(i = 0; i < n_slices; i++){ fprintf(slice_file, "%d ", n_in_slice[i]);}
-				for(i = 0; i < n_slices; i++){ fprintf(slice_file, "%lf ", t_in_slice[i]);}
-				fprintf(slice_file, "\n");
-
-				for(i = 0; i < N; i++)
-				{
-					p_CPU[i].x -= (fixed_dt - time_elapsed) * v_CPU[i].x;
-					p_CPU[i].y -= (fixed_dt - time_elapsed) * v_CPU[i].y;
-					p_CPU[i].z -= (fixed_dt - time_elapsed) * v_CPU[i].z;
-				}
-				time_elapsed = 0.0;
+				dt_CPU[i] = dt_step;
+				how_many_w_CPU[i] = 0;
+				how_many_p_CPU[i] = 0;				
 			}
 			else
 			{
-				time_elapsed += t;
+				if( (how_many_p_CPU[i] == 0) || ( (how_many_p_CPU[i] == 1) && (how_many_w_CPU[i] == 0) ) )//allowed collision
+				{
+					dt_CPU[i] = dt_step;
+				}
+				else //forbidden types of complex collision
+				//We will resolve 1 part of the complex collision, and reduce the dt for all other particles
+				{
+					if(how_many_w_CPU[i] > 0)
+					{
+						complex_colliders[0] = i;
+						complex_colliders[1] = i;
+						how_many_p_CPU[i] = 0;
+					}
+					else
+					{
+						complex_colliders[0] = i;
+						j = what_p_CPU[i];
+						complex_colliders[1] = j;
+						how_many_p_CPU[i] = 1;
+						how_many_p_CPU[j] = 1;
+						what_p_CPU[j] = i;
+						how_many_w_CPU[j] = 0;						
+					}
+					//Now, for all other particale, we dilate dt and clear the collision counters
+					for(j = 0; j < N; j++)
+					{
+						if( (j != complex_colliders[0]) && (j != complex_colliders[1]) )
+						{
+							dt_CPU[j] = dt_step * 0.99;
+							how_many_w_CPU[j] = 0;
+							how_many_p_CPU[j] = 0;
+						}
+					}
+					i = N;
+					break;
+				}
 			}
 		}
-		//*/
 
-		if(visualize) smooth_vis(t);
-		for (i = 0; i < N; i++)
-		{
-			tot_dist[i] += t_CPU[i] * sqrt( v_CPU[i].x * v_CPU[i].x + 
-							v_CPU[i].y * v_CPU[i].y + 
-							v_CPU[i].z * v_CPU[i].z);
-			p_CPU[i].x += t_CPU[i] * v_CPU[i].x;
-			p_CPU[i].y += t_CPU[i] * v_CPU[i].y;
-			p_CPU[i].z += t_CPU[i] * v_CPU[i].z;
-		}
-
+		//update positions
 		for(i = 0; i < N; i++)
 		{
-			if( how_many_p_CPU[i] > 0 || how_many_w_CPU[i] > 0)
-			{
-				resolve_particle_collision(i, t_CPU[i]);
-			}
-			if(DIMENSION < 3) p_CPU[i].z = v_CPU[i].z = 0.0;
+			p_CPU[i] += v_CPU[i] * dt_CPU[i];
 		}
+		t_tot += dt_step;
+	
+	
+		//resolve collision dynamics
+		for(i = 0; i < N; i++)
+		{
+			if( (how_many_p_CPU[i] == 1) || (how_many_w_CPU[i] > 0) )
+			{
+				if(how_many_p_CPU[i] == 1)
+				{
+					p = what_p_CPU[i];
+					if(i > p)//resolve p-p collision once
+					{
+						particle_particle_collision(i, p);
+						tag_CPU[i*max_complex] = p;
+						tag_CPU[p*max_complex] = i;
+					}
+					fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+						i, p, t_tot, 
+						p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
+						0.0, 0.0, 0.0,
+						v_CPU[i].x, v_CPU[i].y, v_CPU[i].z,
+						0.0, 0.0, 0.0
+					);
+				}
+				else
+				{
+					v_in = v_CPU[i];
+					for(j = 0; j < how_many_w_CPU[i]; j++)
+					{
+						w = -(1 + what_w_CPU[max_complex * i + j]);
+						if(WALL_TAG[w] == heated)
+						{
+							v_out = heated_wall_reflection(v_in, normal[w], tangent1[w], tangent2[w], WALL_TEMP[w][0], mass_CPU[w]);
+						}
+						else if(WALL_TAG[w] == passive)
+						{
+							v_out = specular_reflect(v_in, normal[w]);
+						}
+						else
+						{
+							printf("Illegal wall tag");
+							exit(1);
+						}
+						tag_CPU[i * max_complex + j] = what_w_CPU[max_complex * i + j];
+						//do thermo
+						
+						fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+							i, what_w_CPU[max_complex*i+j], t_tot, 
+							p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
+							0.0, 0.0, 0.0,
+							v_CPU[i].x, v_CPU[i].y, v_CPU[i].z,
+							normal[w].x, normal[w].y, normal[w].z
+						);
+					}
+					// check that if any of the walls was heated and it was a complex collision, then 
+					// the outgoing velocity is not pathological. 
+					for(j = 0; j < how_many_w_CPU[i]; j++)
+					{
+						direction = dot(v_out, normal[-(1 + what_w_CPU[max_complex*i+j])] );
+						if(direction < 0)
+						{
+							v_out = specular_reflect(v_out, normal[-(1 + what_w_CPU[max_complex*i+j])] );
+						}
+					}
 
-
+					v_CPU[i] = v_out;
+				}
+				//set remaining tags to default
+				for(int k = j; k < max_complex; k++)
+				{
+					tag_CPU[i*max_complex+k] = i;
+				}
+			}
+		}
+		
 		// update position on GPU to new time step
 		// update velocity on GPU to match CPU 
 		// (and also tag which keeps track of most recent collision for each particle)
-		cudaMemcpy(          p_GPU,            p_CPU,             N * sizeof(float3), cudaMemcpyHostToDevice );
-		cudaMemcpy(          v_GPU,            v_CPU,             N * sizeof(float3), cudaMemcpyHostToDevice );
-		cudaMemcpy(        tag_GPU,          tag_CPU, max_walls * N * sizeof(int   ), cudaMemcpyHostToDevice );
-		tt += t;
+		cudaMemcpy(   p_GPU,   p_CPU,			N * sizeof(float3), cudaMemcpyHostToDevice );
+		cudaMemcpy(   v_GPU,   v_CPU,			N * sizeof(float3), cudaMemcpyHostToDevice );
+		cudaMemcpy( tag_GPU, tag_CPU, max_complex *	N * sizeof(int   ), cudaMemcpyHostToDevice );
+
+		
 
 		//fireproofing: check at each time step that no particles escaped.
 		for (i = 0; i < N; i++)
@@ -1223,25 +1175,29 @@ void n_body()
 				 (p_CPU[i].y * p_CPU[i].y > max_square_displacement[i]) ||
 				 (p_CPU[i].z * p_CPU[i].z > max_square_displacement[i]))
 			{
-				printf("\nError in time %6d: particle %2d escaped!!! last hit %2d %2d %2d\n",
-					time, i, tag_CPU[max_walls * i], tag_CPU[max_walls * i + 1], tag_CPU[max_walls * i + 2]);
-				time = STOP_TIME;
-				break;
+				printf("\nError in step %6d: particle %2d escaped!!! last hit %2d %2d %2d\n",
+					step, i, tag_CPU[max_complex * i], tag_CPU[max_complex * i + 1], tag_CPU[max_complex * i + 2]);
+				step = MAX_STEPS;
+				exit(1);
 			}
 		}
-		//end of this time step
+		//end of this step
 	}
-	printf("%i gas particles, %.1f timesteps, %.4f seconds in time\n", N, 1.0 * time, tt);
-
+	
+	
+	/*/  WRITE FINAL CONDITIONS TO FILE /*/
 	for(i = 0; i < N; i++)
 	{
-		fprintf(mfp_file, "%lf, %lf, %lf, %lf\n", tot_dist[i], p_collisions[i], w_collisions_heated[i], w_collisions_passive[i]);
+		fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+					i, 0, t_tot, 
+					p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
+					0.0, 0.0, 0.0,
+					v_CPU[i].x, v_CPU[i].y, v_CPU[i].z,
+					collision_normal.x, collision_normal.y, collision_normal.z
+			);
 	}
-	fclose(temp_file);
-	fclose(pos_file);
-	fclose(mfp_file);
-	fclose(slice_file);
-	fclose(ent_file);
+	fclose(viz_file);
+	printf("%i gas particles, %.1f steps, %.4f seconds in time\n", N, 1.0 * step, t_tot);
 }
 
 
@@ -1250,9 +1206,8 @@ void control()
 {	
 	clock_t time_0, time_1;
 	
-	if(visualize) draw_picture();
-
 	time_0 = clock();
+	read_input_file();
     	n_body();
 	time_1 = clock();
 	
@@ -1260,37 +1215,9 @@ void control()
 	printf("\n DONE \n");
 }
 
-void Display(void)
-{
-  	if(DIMENSION == 3){
-		gluLookAt(0.0, 0.0, 1.5 * EYE, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
-	}
-	else
-	{
-		gluLookAt(0.0, 0.0, EYE, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
-	}
-	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	control();
-}
-
-void reshape(int w, int h)
-{
-	glViewport(0, 0, (GLsizei) w, (GLsizei) h);
-
-	glMatrixMode(GL_PROJECTION);
-
-	glLoadIdentity();
-
-	glFrustum(-0.2, 0.2, -0.2, 0.2, 0.2, FAR);
-
-	glMatrixMode(GL_MODELVIEW);
-}
 
 int main(int argc, char** argv)
 {
-	glutInit(&argc,argv);
-
-	//now that glut commands have been stripped from the 
 	if(--argc < 1)
 	{
 		printf("Without input file, reverting to default parameters\n");
@@ -1299,42 +1226,9 @@ int main(int argc, char** argv)
 	{
 		in_fname = argv[1];
 	}
-	set_initail_conditions();
 
-	if (visualize)
-	{
-		glutInitDisplayMode(GLUT_DOUBLE | GLUT_DEPTH | GLUT_RGB);
-		glutInitWindowSize(XWindowSize, YWindowSize);
-		glutInitWindowPosition(500, 0);
-		glutCreateWindow("Gas Particles");
-		GLfloat light_position[] = { 1.0, 1.0, 1.0, 0.0 };
-		GLfloat light_ambient[] = { 0.0, 0.0, 0.0, 1.0 };
-		GLfloat light_diffuse[] = { 1.0, 1.0, 1.0, 1.0 };
-		GLfloat light_specular[] = { 1.0, 1.0, 1.0, 1.0 };
-		GLfloat lmodel_ambient[] = { 0.2, 0.2, 0.2, 1.0 };
-		GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 };
-		GLfloat mat_shininess[] = { 10.0 };
-		glClearColor(0.0, 0.0, 0.0, 0.0);
-		glShadeModel(GL_SMOOTH);
-		glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE);
-		glLightfv(GL_LIGHT0, GL_POSITION, light_position);
-		glLightfv(GL_LIGHT0, GL_AMBIENT, light_ambient);
-		glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse);
-		glLightfv(GL_LIGHT0, GL_SPECULAR, light_specular);
-		glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lmodel_ambient);
-		glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
-		glMaterialfv(GL_FRONT, GL_SHININESS, mat_shininess);
-		glEnable(GL_LIGHTING);
-		glEnable(GL_LIGHT0);
-		glEnable(GL_COLOR_MATERIAL);
-		glEnable(GL_DEPTH_TEST);
-		glutDisplayFunc(Display);
-		glutReshapeFunc(reshape);
-		glutMainLoop();
-	}
-	else
-	{
-		control();
-	}
+	control();
 	return 0;
 }
+
+

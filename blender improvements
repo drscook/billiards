@@ -1,0 +1,19 @@
+Camera at x=0, y=0, z=1.5*box length
+
+Show all walls except “front” and top one (at z=box length)
+
+Shadows - show only on floor (or none at all)
+
+No shadows on the particles themselves (not so important, if difficult)
+
+Increase contrast between particles and walls
+
+Color particles based on temperature
+
+Color walls based on temperature
+
+  Add record type to visualization file for wall temp
+  
+  Currently, all point on same wall are same temp.  But might consider “hotspots” on same wall of different temp.
+  
+  Does blender make it easy to do color interpolation?
