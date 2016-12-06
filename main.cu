@@ -652,43 +652,39 @@ __global__ void find(float3 * p, float3 * v, float * radius, float * mass,  // p
 			{
 				if(this_particle == j)//skip self-collision time
 				{
-					break;
 				}
+				else
+				{
+					ok = 1;
+					if((tag[max_complex * this_particle] == j) && (tag[max_complex * j] == this_particle) )ok = 0;
 
-				ok = 1;
-				for(k = 0; k < max_complex; k++)//skip if last event was collision with particle j
-				{
-					if( (tag[max_complex * this_particle + k] == j) || (tag[max_complex * j + k] == this_particle) )
+					if(ok > 0)
 					{
-						ok = 0;
-					}
-				}
-				if(ok > 0)
-				{
-				  	collides = particle_particle_collision(p, v, radius, this_particle, j, max_cube_dim, &dt);
-					if(collides > 0)
-					{
-						if(first_collision > 0)
-						{	
-							ddt = -1;
-						}
-						else
+					  	collides = particle_particle_collision(p, v, radius, this_particle, j, max_cube_dim, &dt);
+						if(collides > 0)
 						{
-							ddt = ceil((dt - current_min_dt) / tol_float);
-						}
-						if(ddt <=1)//within 1 tol_float of current_min_dt.  So it counts
-						{
-							if(ddt <= 0)//less than current_min_dt.  So becomes current_min_dt, but may not necessarily clear prior events
-							{
-								current_min_dt = dt;
-								if(ddt <= -1)//more than 1 float_tol less than current_min_dt.  Thus, clears prior events
-								{
-									how_many_p[this_particle] = 0;
-								}
+							if(first_collision > 0)
+							{	
+								ddt = -1;
 							}
-						  	first_collision = 0;
-							what_p_hit[this_particle] = j;
-							how_many_p[this_particle]++;
+							else
+							{
+								ddt = ceil((dt - current_min_dt) / tol_float);
+							}
+							if(ddt <=1)//within 1 tol_float of current_min_dt.  So it counts
+							{
+								if(ddt <= 0)//less than current_min_dt.  So becomes current_min_dt, but may not necessarily clear prior events
+								{
+									current_min_dt = dt;
+									if(ddt <= -1)//more than 1 float_tol less than current_min_dt.  Thus, clears prior events
+									{
+										how_many_p[this_particle] = 0;
+									}
+								}
+							  	first_collision = 0;
+								what_p_hit[this_particle] = j;
+								how_many_p[this_particle]++;
+							}
 						}
 					}
 				}
@@ -777,17 +773,10 @@ void particle_particle_collision(int i0, int i1)
 	p_collisions[i0] += 1.0;
 	p_collisions[i1] += 1.0;
 	n_events = 2;
-	collides[0] = i0;
-	collides[1] = i1;
-	collider[0] = i1;
-	collider[1] = i0;
-
-	for(int i = 0; i < max_complex; i++) tag_CPU[max_complex * i1 + i] = tag_CPU[max_complex * i0 + i] = N;
 
 	tag_CPU[max_complex * i0] = i1;
 	tag_CPU[max_complex * i1] = i0;
 
-	how_many_w_CPU[i0] = how_many_w_CPU[i1] = how_many_p_CPU[i1] = how_many_p_CPU[i0] = 0;
 
 	m1m2 = mass_CPU[i0] + mass_CPU[i1];
 	m1m2 = (m1m2 * m1m2 > 0) ? m1m2 : 1.0;
@@ -1008,11 +997,9 @@ void n_body()
 				if(how_many_p_CPU[i] == 1)
 				{
 					p = what_p_CPU[i];
-					if(i > p)//resolve p-p collision once
+					if(i < p)//resolve p-p collision once
 					{
 						particle_particle_collision(i, p);
-						tag_CPU[i*max_complex] = p;
-						tag_CPU[p*max_complex] = i;
 					}
 					fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
 						i, p, t_tot, 
@@ -1021,6 +1008,7 @@ void n_body()
 						v_CPU[i].x, v_CPU[i].y, v_CPU[i].z,
 						0.0, 0.0, 0.0
 					);
+					j = 1;
 				}
 				else
 				{
