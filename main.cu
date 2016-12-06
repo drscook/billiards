@@ -656,14 +656,8 @@ __global__ void find(float3 * p, float3 * v, float * radius, float * mass,  // p
 				else
 				{
 					ok = 1;
-					if((tag[max_complex * this_particle] == j) || (tag[max_complex * j] == this_particle) )ok = 0;
-					//for(k = 0; k < max_complex; k++)//skip if last event was collision with particle j
-					//{
-					//	if( (tag[max_complex * this_particle + k] == j) || (tag[max_complex * j + k] == this_particle) )
-					//	{
-					//		ok = 0;
-					//	}
-					//}
+					if((tag[max_complex * this_particle] == j) && (tag[max_complex * j] == this_particle) )ok = 0;
+
 					if(ok > 0)
 					{
 					  	collides = particle_particle_collision(p, v, radius, this_particle, j, max_cube_dim, &dt);
@@ -1007,8 +1001,6 @@ void n_body()
 					if(i < p)//resolve p-p collision once
 					{
 						particle_particle_collision(i, p);
-						//tag_CPU[i*max_complex] = p;
-						//tag_CPU[p*max_complex] = i;
 					}
 					fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
 						i, p, t_tot, 
