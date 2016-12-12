@@ -1,13 +1,13 @@
 # dimension
 3
 # number of gas particles
-23
+20
 # size of gas particles
 0.1
 # type of particle-initialization scheke (0-cube, 1-pyramid)
 0
 # number of collision steps
-1000
+50000
 # wall type & wall temp
 1 10 10 
 1 90 90
