@@ -5,15 +5,71 @@
 #include <random>
 #include "/usr/local/cuda/samples/common/inc/helper_math.h"
 
-//KEY SUBTLETY: There could be cmmplex events which involve multiple particles and/or multiple walls.
-//We allow only 2 type of events
-//Type 1: 1 particle hitting 1 or more walls (no additional particles)
-//Type 2: 2 particles hitting each other (no additional particles, no walls)
-//We will take care to detect more complex collisions and avoid them by
-//delaying the particles during flight.  More specifically, if dt_step is the time increment
-//for this step, most particles positions are updated by pos += vel * dt_step.  But particles
-//involved in a forbidden complex collision are updated by pos += vel * dt_step * rand, where
-//rand is a random number slightly less than 1.
+
+/***************************************************************
+**	TAGS
+
+Particles are indexed 0, 1, 2, ..., N-1
+Walls are indexed -1, -2, -3, ...
+Particles carry tags that indicate which object it hit during the prior step (if any).
+
+At each step, for each particle, we compute time to collision with every particle and wall.
+However, we do not want to include times for the objects it hit in the prior step (if any).
+These times should be exactly zero, but they could have floating point error and appear to be very small
+positive numbers.  This will defeat our logic.  Tags are the fix.
+
+max_complex is the largest number of walls a particle may hit simulateously (see HANDLING COMPLEX COLLISIONS)
+So each particle carries a list of max_complex tags.  by default, tags are the particle's own index.
+The tags list for particle i is written in slots i*max_complex thru (i+1)*max_complex-1 of tag_CP
+
+
+**     NOTE FOR FUTURE VERSIONS IF WALLS CURVE
+In the current version, a particle carries the same tags until its next collision event.
+This is fine if all wall are convex, since a particle can not make consecutive collisions
+on the same wall.  But for concave walls, this is not true.  We should rethink this logic.
+
+
+**    HANDLING COMPLEX COLLISIONS   
+
+KEY SUBTLETY: There could be cmmplex events which involve multiple particles and/or multiple walls. 
+We allow only 2 type of events
+Type 1: 1 particle hitting >=1 wall (no additional particles)
+Type 2: 2 particles hitting each other (no additional particles, no walls)
+We allow multiple simultaneous collisions of the above types at different locations.
+However, we do not allow more complex collisions.
+Type 3: >=2 particles and >=1 walls
+Type 4: >=3 particles
+We will take care to detect more complex collisions and avoid them as follows.
+
+Def: first = particle with smallest index label
+
+Def complex particls = particle involved in a complex collision
+
+Def: dilate = mulitply dt by a number slightly less than 1.  This happpens BEFORE updating position
+via new_pos = old_pos + vel * dt.  Dilation results in particles moving slightly
+less far than they should.  Therefore expected collisions do not occur during this step. 
+
+Type 3 fix: for first complex particle, resolve all wall collisions.  Dilate dt for ALL other particles.
+TypE 4 fix: for first and second comexpl particles, resolve collision.  Dilate dt for ALL other particles.
+
+Note that ALL particles are dilated except the 1 or 2 to be resolved.  This includes particles not
+involved in the complex collision.  We had considered only dilating particles involved in the complex
+collision, but realized that this could "back" a dilated particle into another undilated particle.
+
+
+
+***     HANDLING CORNERS COLLISIONS
+Def : corner collision = a Type 1 collision with 1 particle and >=2 walls.
+
+We resolve each wall collision separately and sequentially.
+However, this could result in a trajectory pointed through a wall and out of the billiard cell.
+This could happen if some of the walls uses a non-specular reflection law, or if the corner angle is acute.
+To fix this, we loop through the walls again and do another SPECULAR reflection at each
+wall that particle's trajectory is pointed through.
+We may need to repeat this loop mulitple times if the corner is very acutre.
+
+
+************************************************************************************/
 
 //openGL vis parameters
 #define XWindowSize 2500
@@ -86,8 +142,8 @@ float3 normal[6];
 float3 tangent1[6];
 float3 tangent2[6];
 float alpha[6];
-int WALL_TAG[6];
-float WALL_TEMP[6][2];
+int wall_type[6];
+float wall_temp[6][2];
 float max_temp = 90.0;
 float min_temp = 45.0;
 
@@ -163,13 +219,13 @@ float impulse_sum = 0.0;
 int thermo_rec_length = 1000;
 Thermo_Record pressure = Thermo_Record(thermo_rec_length);
 
-void compute_thermo(float t_tot, float mass, float3 v_in, float3 v_out, float3 normal)
+void compute_thermodynamics(float3 v_in, float3 v_out, float3 normal, float wall_temp, float mass, float t_tot)
 {
-//	float impulse, P;
-//	impulse = mass * ( dot(v_out - v_in, normal));
-//	impulse_sum += impulse;
-//	P = (impulse_sum / t_tot) / surface_area;
-//	pressure.update(P);
+	float impulse, P;
+	impulse = mass * ( dot(v_out - v_in, normal));
+	impulse_sum += impulse;
+	P = (impulse_sum / t_tot) / surface_area;
+	pressure.update(P);
 }
 
 
@@ -200,12 +256,12 @@ void read_input_file()
 	ignore_particle_interaction = false;
 
 	//walls
-	WALL_TAG[0] = WALL_TAG[1] = heated;
-	WALL_TAG[2] = WALL_TAG[3] = WALL_TAG[4] = WALL_TAG[5] = passive;
-	WALL_TEMP[0][0] = WALL_TEMP[0][1] = 45.0;
-	WALL_TEMP[1][0] = WALL_TEMP[1][1] = 90.0;
-	WALL_TEMP[2][0] = WALL_TEMP[2][1] = WALL_TEMP[3][0] = WALL_TEMP[3][1] = 0.0;
-	WALL_TEMP[4][0] = WALL_TEMP[4][1] = WALL_TEMP[5][0] = WALL_TEMP[5][1] = 0.0;
+	wall_type[0] = wall_type[1] = heated;
+	wall_type[2] = wall_type[3] = wall_type[4] = wall_type[5] = passive;
+	wall_temp[0][0] = wall_temp[0][1] = 45.0;
+	wall_temp[1][0] = wall_temp[1][1] = 90.0;
+	wall_temp[2][0] = wall_temp[2][1] = wall_temp[3][0] = wall_temp[3][1] = 0.0;
+	wall_temp[4][0] = wall_temp[4][1] = wall_temp[5][0] = wall_temp[5][1] = 0.0;
 
 	if( (fp = fopen(in_fname,"r")) == NULL)
 	{
@@ -250,9 +306,9 @@ void read_input_file()
 		{
 			fgets(buff, bdim, fp);
 			sscanf(buff, "%d %lf %lf", &d, &f, &g);
-			WALL_TAG[i] = d;
-			WALL_TEMP[i][0] = f;
-			WALL_TEMP[i][1] = g;
+			wall_type[i] = d;
+			wall_temp[i][0] = f;
+			wall_temp[i][1] = g;
 		}
 		fgets(buff, bdim, fp);
 		fgets(buff, bdim, fp);
@@ -278,7 +334,7 @@ void pack_particles()
 {
 	int i, j, k, num, particles_per_side;
 	float max_radius, hole_radius, temp, rad_sep = 1.0 + 1.0 / 20.0;
-	float T, tol = 1.0e-7;
+	float T;
 	float x_length, x_start;
 	float y_length, y_start;
 	float z_length, z_start;
@@ -469,8 +525,8 @@ void set_initial_conditions()
 	max_temp = min_temp = 0.0; // average temperature of walls
 	for(i = 0; i < 6; i++)
 	{
-		max_temp = MAX(max_temp, WALL_TEMP[i][0]);
-		min_temp = MIN(min_temp, WALL_TEMP[i][0]);
+		max_temp = MAX(max_temp, wall_temp[i][0]);
+		min_temp = MIN(min_temp, wall_temp[i][0]);
 	}
 	default_p_temp = (max_temp + min_temp) / 2.0;
 
@@ -508,7 +564,7 @@ void set_initial_conditions()
 // evaluates temperature of wall at a point assuming T varies linearly between ends
 float wall_temperature(float x, int wall)
 {
-	return (x + MAX_CUBE_DIM) * (WALL_TEMP[wall][0] + (WALL_TEMP[wall][1] - WALL_TEMP[wall][0]) / (2.0 * MAX_CUBE_DIM));
+	return (x + MAX_CUBE_DIM) * (wall_temp[wall][0] + (wall_temp[wall][1] - wall_temp[wall][0]) / (2.0 * MAX_CUBE_DIM));
 }
 
 
@@ -665,25 +721,36 @@ __global__ void find(float3 * p, float3 * v, float * radius, float * mass,  // p
 						{
 							if(first_collision > 0)
 							{	
-								ddt = -1;
+								ddt = -2;
 							}
 							else
 							{
 								ddt = ceil((dt - current_min_dt) / tol_float);
 							}
-							if(ddt <=1)//within 1 tol_float of current_min_dt.  So it counts
+/*************************************************************
+If ddt >= 1, this event is later than current_min_dt.  So we ignore it and move to next.
+If -1 < ddt < 1, this event is simultaneous with current_min_dt.
+If ddt < -1, this event is earlier than current_min_dt.
+Logic
+If ddt < -1, clear all prior events
+If ddt < 0, replace current_min_dt by dt
+If ddt < 1, record the event
+if ddt >= 1, ignore the event
+**************************************************************/
+							if(ddt <= 1)
 							{
-								if(ddt <= 0)//less than current_min_dt.  So becomes current_min_dt, but may not necessarily clear prior events
+								if(ddt <= 0)
 								{
-									current_min_dt = dt;
-									if(ddt <= -1)//more than 1 float_tol less than current_min_dt.  Thus, clears prior events
+									if(ddt <= -1)
 									{
 										how_many_p[this_particle] = 0;
+										how_many_w[this_particle] = 0;
 									}
+									current_min_dt = dt;
 								}
-							  	first_collision = 0;
 								what_p_hit[this_particle] = j;
 								how_many_p[this_particle]++;
+							  	first_collision = 0;
 							}
 						}
 					}
@@ -710,26 +777,27 @@ __global__ void find(float3 * p, float3 * v, float * radius, float * mass,  // p
 				{
 					if(first_collision > 0)
 					{
-						ddt = -1;
+						ddt = -2;
 					}
 					else
 					{
 						ddt = ceil((dt - current_min_dt) / tol_float);
 					}
+//Read logic for ddt above
 					if(ddt <= 1)
 					{
 						if(ddt <= 0)
 						{
-							current_min_dt = dt;
 							if(ddt <= -1)
 							{
 								how_many_p[this_particle] = 0;
 								how_many_w[this_particle] = 0;
 							}	
+							current_min_dt = dt;
 						}
-						first_collision = 0;
 						what_w_hit[max_complex * this_particle + how_many_w[this_particle]] = -(j + 1);
 						how_many_w[this_particle]++;
+						first_collision = 0;
 					}
 				}
 			}
@@ -809,43 +877,6 @@ void particle_particle_collision(int i0, int i1)
 
 }
 
-//float find_min_dt_and_update(float * times, int * idx, int * i0, int * i1)
-void find_min_dt(float * times, float * min_dt)
-{
-	int i;
-	float t = -1., timetol = 1.0e-4;
-
-	// find minimum value in times, and the corresponding value in idx
-	//              both at array index (*i0), and save:
-	//
-	//          (*i1) = idx[(*i0)],    min(t) = times[(*i0)]
-	for(i = 0; i < N; i++) 
-	{
-		if( (how_many_p_CPU[i] > 0) || (how_many_w_CPU[i] > 0) )
-		{
-			t = times[i];
-		}
-	}
-	for(i = 0; i < N; i++)
-	{
-		if( (t >= times[i]) && ( (how_many_p_CPU[i] > 0) || (how_many_w_CPU[i] > 0) ) )
-		{
-			t = times[i];
-		}
-	}
-
-	for(i = 0; i < N; i++)
-	{
-		if( ( (how_many_p_CPU[i] < 1) && (how_many_w_CPU[i] < 1) ) || (times[i] > (t + timetol) ) )
-		{
-			how_many_p_CPU[i] = 0;
-			how_many_w_CPU[i] = 0;
-		}
-		times[i] = 0.99 * t;
-	}
-
-	(*min_dt) = 0.99 * t;
-}
 
 void errorCheck(int num, const char * message)
 {
@@ -857,6 +888,7 @@ void errorCheck(int num, const char * message)
 	}
 }
 
+
 void n_body()
 {
 	float t_tot = 0.0;
@@ -865,6 +897,7 @@ void n_body()
 	float u, direction;
 	int complex_colliders[2];
 	int wall_collision = 0;
+	int ok, pass = 0;
 	FILE * viz_file;
 	FILE * thermo_file;
 	char dir[256];
@@ -873,6 +906,13 @@ void n_body()
 	int smart_max_steps = MAX_STEPS;
 	int smart_stop_found = 0;
 	float3 v_in, v_out;
+	float impulse_sum = 0.0;
+
+	int num_type_I_simple = 0;
+	int num_type_I_complex = 0;
+	int num_type_II = 0;
+	int num_type_III = 0;
+	int num_type_IV = 0;
 	
 	set_initial_conditions();
 
@@ -930,11 +970,12 @@ void n_body()
 			exit(1);
 		}
 
-		//check and handle complex collisions
+		//Detect and handle complex collisions.  This part is delicate.
+		//See lengthy description near top of this file.
 		dt_cutoff = dt_step + tol_float;
 		for(i = 0; i < N; i++)
 		{			
-			if(dt_CPU[i] > dt_step) //not involved in this event
+			if(dt_CPU[i] > dt_cutoff) //not involved in this event
 			{
 				dt_CPU[i] = dt_step;
 				how_many_w_CPU[i] = 0;
@@ -948,12 +989,14 @@ void n_body()
 				}
 				else //forbidden types of complex collision
 				//We will resolve 1 part of the complex collision, and reduce the dt for all other particles
+				//See lengthy description near top of file
 				{
 					if(how_many_w_CPU[i] > 0)
 					{
 						complex_colliders[0] = i;
 						complex_colliders[1] = i;
 						how_many_p_CPU[i] = 0;
+						num_type_III++;
 					}
 					else
 					{
@@ -963,7 +1006,8 @@ void n_body()
 						how_many_p_CPU[i] = 1;
 						how_many_p_CPU[j] = 1;
 						what_p_CPU[j] = i;
-						how_many_w_CPU[j] = 0;						
+						how_many_w_CPU[j] = 0;
+						num_type_IV++;
 					}
 					//Now, for all other particale, we dilate dt and clear the collision counters
 					for(j = 0; j < N; j++)
@@ -992,35 +1036,46 @@ void n_body()
 		//resolve collision dynamics
 		for(i = 0; i < N; i++)
 		{
-			if( (how_many_p_CPU[i] == 1) || (how_many_w_CPU[i] > 0) )
+			if( (how_many_p_CPU[i] == 1) || (how_many_w_CPU[i] > 0) )//particle i IS involved
 			{
-				if(how_many_p_CPU[i] == 1)
+				if(how_many_p_CPU[i] == 1)//event is a particle-particle collision
 				{
 					p = what_p_CPU[i];
-					if(i < p)//resolve p-p collision once
+					if(i < p)//resolve p-p collision once, not twice
 					{
+						num_type_II++;
 						particle_particle_collision(i, p);
 					}
-					fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+					fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
 						i, p, t_tot, 
 						p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
 						0.0, 0.0, 0.0,
 						v_CPU[i].x, v_CPU[i].y, v_CPU[i].z,
-						0.0, 0.0, 0.0
+						0.0, 0.0, 0.0,
+						pressure.latest_value
 					);
 					j = 1;
 				}
-				else
+				else//event is a particle-walls collisions
 				{
+					if(how_many_w_CPU[i] == 1)
+					{
+						num_type_I_simple++;
+					}
+					else
+					{
+						num_type_I_complex++;
+					}
 					v_in = v_CPU[i];
 					for(j = 0; j < how_many_w_CPU[i]; j++)
 					{
 						w = -(1 + what_w_CPU[max_complex * i + j]);
-						if(WALL_TAG[w] == heated)
+						if(wall_type[w] == heated)
 						{
-							v_out = heated_wall_reflection(v_in, normal[w], tangent1[w], tangent2[w], WALL_TEMP[w][0], mass_CPU[w]);
+							v_out = heated_wall_reflection(v_in, normal[w], tangent1[w], tangent2[w], wall_temp[w][0], mass_CPU[w]);
+							compute_thermodynamics(v_in, v_out, normal[w], wall_temp[w][0], mass_CPU[i], t_tot);
 						}
-						else if(WALL_TAG[w] == passive)
+						else if(wall_type[w] == passive)
 						{
 							v_out = specular_reflect(v_in, normal[w]);
 						}
@@ -1030,29 +1085,48 @@ void n_body()
 							exit(1);
 						}
 						tag_CPU[i * max_complex + j] = what_w_CPU[max_complex * i + j];
-						//do thermo
-						
-						fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
+						v_in = v_out;
+
+						fprintf(viz_file, "c, %d, %d, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf, %lf\n", 
 							i, what_w_CPU[max_complex*i+j], t_tot, 
 							p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, 
 							0.0, 0.0, 0.0,
-							v_CPU[i].x, v_CPU[i].y, v_CPU[i].z,
-							normal[w].x, normal[w].y, normal[w].z
+							v_out.x, v_out.y, v_out.z,
+							normal[w].x, normal[w].y, normal[w].z,
+							pressure.latest_value
 						);
-					}
-					// check that if any of the walls was heated and it was a complex collision, then 
-					// the outgoing velocity is not pathological. 
-					for(j = 0; j < how_many_w_CPU[i]; j++)
+					}					
+					// check that the outgoing velocity is not pathological.  See decription at top of file.
+					//printf("Particle-Wall collision at step %d btw particle %d and the walls listed below\n",step,i);
+					//printf("There have been %d type I simple, %d type I complex, %d type II, %d type III and %d type IV collisions so far\n",num_type_I_simple, num_type_I_complex, num_type_II, num_type_III, num_type_IV);
+					pass = 0;
+					do
 					{
-						direction = dot(v_out, normal[-(1 + what_w_CPU[max_complex*i+j])] );
-						if(direction < 0)
+						ok = 1;
+						for(j = 0; j < how_many_w_CPU[i]; j++)
 						{
-							v_out = specular_reflect(v_out, normal[-(1 + what_w_CPU[max_complex*i+j])] );
+							w = -(1 + what_w_CPU[max_complex * i + j]);
+							//direction = dot(v_out, normal[w]);
+							//printf("wall %d, v.n = %f\n",w,direction);
+							if(dot(v_out, normal[w]) < 0)//If true, particle will pass through wall w.  To fix, we perform another specular reflection
+							{
+								//printf("second collision at wall %d\n",w);
+								v_out = specular_reflect(v_out, normal[w]);
+								ok = 0;
+							}
 						}
+						pass++;
+						//printf("Pass %d\n",pass);
 					}
-
+					while ((ok == 0) && (pass < 20));
+					if(pass >= 20)
+					{
+						printf("Could not resolve collision with multiple walls\n");
+						exit(1);
+					}
 					v_CPU[i] = v_out;
 				}
+
 				//set remaining tags to default
 				for(int k = j; k < max_complex; k++)
 				{
@@ -1077,8 +1151,8 @@ void n_body()
 				 (p_CPU[i].y * p_CPU[i].y > max_square_displacement[i]) ||
 				 (p_CPU[i].z * p_CPU[i].z > max_square_displacement[i]))
 			{
-				printf("\nError in step %6d: particle %2d escaped!!! last hit %2d %2d %2d\n",
-					step, i, tag_CPU[max_complex * i], tag_CPU[max_complex * i + 1], tag_CPU[max_complex * i + 2]);
+				printf("\nError in step %6d: particle %2d escaped!!! It's now at position (%f, %f, %f). Last hit %2d %2d %2d\n",
+					step, i, p_CPU[i].x, p_CPU[i].y, p_CPU[i].z, tag_CPU[max_complex * i] + 1, tag_CPU[max_complex * i + 1] + 1, tag_CPU[max_complex * i + 2] + 1);
 				step = MAX_STEPS;
 				exit(1);
 			}
@@ -1099,7 +1173,7 @@ void n_body()
 			);
 	}
 	fclose(viz_file);
-	printf("%i gas particles, %.1f steps, %.4f seconds in time\n", N, 1.0 * step, t_tot);
+	printf("%i gas particles, %d steps, %.4f seconds in time\n", N, step, t_tot);
 }
 
 
@@ -1131,5 +1205,3 @@ int main(int argc, char** argv)
 	control();
 	return 0;
 }
-
-
